@@ -124,6 +124,23 @@ const B_BLOCKQUOTE = grammar(/^( {0,3}> ?(?:(?![ \t]*(?:\n|$))(paragraph)|[^\n]*
   .make();
 const B_TEXT = /^[^\n]+/;
 
+// What may interrupt a gfm paragraph at the start of its next line: the negative lookahead of
+// B_PARAGRAPH, cut out of its source so it stays exactly marked's, used as a sticky probe.
+const PARA_INTERRUPT = (() => {
+  const src = B_PARAGRAPH.source;
+  const head = '^([^\\n]+(?:\\n(?!';
+  const tail = ')[^\\n]+)*)';
+  if (!src.startsWith(head) || !src.endsWith(tail)) throw new Error('paragraph grammar changed');
+  return new RegExp('(?:' + src.slice(head.length, src.length - tail.length) + ')', 'y');
+})();
+// A setext underline: where an lheading can end (B_LHEADING's tail) ...
+const SETEXT_UNDERLINE = /\n {0,3}(?:=+|-+)[ \t]*(?:\n|$)/g;
+// ... and a blank line, which no lheading can cross.
+const BLANK_LINE_BREAK = /\n[ \t]*\n/g;
+// first characters (after up to three spaces) of every paragraph interruption except the table one
+const CH_PARA_STOP = new Uint8Array(128);
+for (const ch of ' \t-_*#>`~<+1') CH_PARA_STOP[ch.charCodeAt(0)] = 1;
+
 // ---- inline grammar (gfm)
 const U_PUNCT = /[\p{P}\p{S}]/u;
 const U_PUNCT_SPACE = /[\s\p{P}\p{S}]/u;
@@ -306,7 +323,23 @@ function decodeNumeric(s) {
   });
 }
 
+// characters encodeURI() leaves alone, plus '%' (which marked's %25 -> % undo turns back into itself)
+const CH_URI_SAFE = new Uint8Array(128);
+for (let c = 0; c < 128; c++) if (CH_ALNUM_INIT(c)) CH_URI_SAFE[c] = 1;
+for (const ch of "-_.!~*'();/?:@&=+$,#%") CH_URI_SAFE[ch.charCodeAt(0)] = 1;
+function CH_ALNUM_INIT(c) {
+  return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
 function cleanUrl(href) {
+  let i = 0;
+  const n = href.length;
+  while (i < n) {
+    const c = href.charCodeAt(i);
+    if (c >= 128 || CH_URI_SAFE[c] !== 1) break;
+    i++;
+  }
+  if (i === n) return href;
   try {
     return encodeURI(href).replace(/%25/g, '%');
   } catch {
@@ -354,6 +387,88 @@ function expandTabs(s, col = 0) {
     }
   }
   return out;
+}
+
+/** `s.replace(/^[ \t]+/, (v) => expandTabs(v, col))` without the regex: spaces alone stay as they are. */
+function expandLeading(s, col) {
+  let i = 0;
+  let tab = false;
+  const n = s.length;
+  while (i < n) {
+    const c = s.charCodeAt(i);
+    if (c === 9) tab = true;
+    else if (c !== 32) break;
+    i++;
+  }
+  return tab ? expandTabs(s.slice(0, i), col) + s.slice(i) : s;
+}
+
+/** `s.search(/[^ ]/)` */
+function firstNonSpace(s) {
+  const n = s.length;
+  for (let i = 0; i < n; i++) if (s.charCodeAt(i) !== 32) return i;
+  return -1;
+}
+
+// first characters (after up to three spaces) that can start a fence, heading, html block,
+// block quote, list bullet or thematic break: the list item probes need one of them
+const CH_PROBE = new Uint8Array(128);
+for (const ch of '`~#<>*+-_0123456789') CH_PROBE[ch.charCodeAt(0)] = 1;
+
+/** Could any of the list item probes (all `^ {0,n}X`) match `line`? */
+function probeCandidate(line) {
+  let k = 0;
+  while (k < 4 && line.charCodeAt(k) === 32) k++;
+  if (k > 3) return false;
+  const c = line.charCodeAt(k);
+  return c < 128 && CH_PROBE[c] === 1;
+}
+
+/**
+ * End of the gfm paragraph that starts at 0: what B_PARAGRAPH would match. Lines are taken one at
+ * a time; only a line that could start an interruption runs the (exact) interruption probe.
+ */
+function paragraphEnd(src) {
+  const n = src.length;
+  let pos = src.indexOf('\n');
+  if (pos === -1) return n;
+  for (;;) {
+    const ls = pos + 1;
+    if (ls >= n) return pos;
+    const c = src.charCodeAt(ls);
+    if (c === 10) return pos;
+    let next = src.indexOf('\n', ls);
+    if (next === -1) next = n;
+    let quick = c >= 128 || CH_PARA_STOP[c] !== 1;
+    if (quick && next < n) {
+      // the table interruption needs the line after this one to open a delimiter row
+      let k = next + 1;
+      let sp = 0;
+      while (sp < 3 && src.charCodeAt(k) === 32) {
+        k++;
+        sp++;
+      }
+      const d = src.charCodeAt(k);
+      if (d === 124 || d === 58 || d === 45) quick = false;
+    }
+    if (!quick) {
+      PARA_INTERRUPT.lastIndex = ls;
+      if (PARA_INTERRUPT.test(src)) return pos;
+    }
+    if (next >= n) return n;
+    pos = next;
+  }
+}
+
+/** Last code point of the (at most) two code units before `l`, as `[...s.slice(l - 2, l)].at(-1)`. */
+function codePointBefore(s, l) {
+  if (l <= 0) return '';
+  const lo = s.charCodeAt(l - 1);
+  if (lo >= 0xdc00 && lo <= 0xdfff && l >= 2) {
+    const hi = s.charCodeAt(l - 2);
+    if (hi >= 0xd800 && hi <= 0xdbff) return s.slice(l - 2, l);
+  }
+  return s[l - 1];
 }
 
 function firstLine(s) {
@@ -484,27 +599,56 @@ function textRunLength(s) {
   if (!isAlnum(c) && mailSchemeAt(s, 1)) return 1;
   let pos = 1;
   if (c === 96 || c === 126) while (pos < n && s.charCodeAt(pos) === c) pos++;
-  if (pos < n) {
-    c = s.charCodeAt(pos);
-    if (c === 96 || c === 126) return pos;
+  if (pos >= n) return n;
+  c = s.charCodeAt(pos);
+  if (c === 96 || c === 126) return pos;
+  if (c === 32 && hardBreakAt(s, pos)) return pos;
+
+  // `[email chars]+@` lookaheads: only the first '@' ahead matters, and only the start of the run of
+  // email characters that ends at it. `trigger` is the one position whose char ends the text there.
+  let at = s.indexOf('@', pos);
+  let trigger = -1;
+  if (at !== -1) {
+    const rs = emailRunStart(s, at, pos);
+    if (rs === pos && at > pos) return pos;
+    if (rs > pos && rs < at) trigger = rs - 1;
   }
-  if (hardBreakAt(s, pos) || emailAt(s, pos)) return pos;
+
   for (let q = pos; q < n; q++) {
     c = s.charCodeAt(q);
     if (c < 128) {
       if (CH_STOP[c] === 1) return q;
-      if ((c === 104 || c === 72) && httpAt(s, q)) return q;
-      if ((c === 102 || c === 70) && ftpAt(s, q)) return q;
-      if (c === 119 && s.startsWith('ww.', q + 1)) {
+      if (c === 104 || c === 72) {
+        if (httpAt(s, q)) return q;
+      } else if (c === 102 || c === 70) {
+        if (ftpAt(s, q)) return q;
+      } else if (c === 119 && s.startsWith('ww.', q + 1)) {
         const b = s.charCodeAt(q - 1);
         if (b === 42 || b === 95 || b === 126 || b === 40 || isJsSpace(b)) return q;
       }
     }
-    if (c !== 32 && hardBreakAt(s, q + 1)) return q + 1;
-    if (!isAlnum(c) && mailSchemeAt(s, q + 1)) return q + 1;
-    if (!isEmailChar(c) && emailAt(s, q + 1)) return q + 1;
+    const d = s.charCodeAt(q + 1);
+    if (d === 32 && c !== 32 && hardBreakAt(s, q + 1)) return q + 1;
+    if ((d === 109 || d === 120) && !isAlnum(c) && mailSchemeAt(s, q + 1)) return q + 1;
+    if (q === trigger) return q + 1;
+    if (q === at) {
+      at = s.indexOf('@', q + 1);
+      trigger = -1;
+      if (at !== -1) {
+        const rs = emailRunStart(s, at, q + 1);
+        if (rs === q + 1 && at > q + 1) return q + 1; // this '@' is followed by `[email]+@`
+        if (rs > q + 1 && rs < at) trigger = rs - 1;
+      }
+    }
   }
   return n;
+}
+
+/** Start of the run of email characters that ends at `at`, not going below `lo`. */
+function emailRunStart(s, at, lo) {
+  let k = at;
+  while (k > lo && isEmailChar(s.charCodeAt(k - 1))) k--;
+  return k;
 }
 
 /** Can the gfm url tokenizer match at the start of `s`? (necessary conditions only) */
@@ -548,6 +692,10 @@ class Md {
 
   blockTokens(src, tokens, clipped) {
     const links = this.links;
+    // positions (in `whole`) of the next setext underline and the next blank line, kept lazily
+    const whole = src;
+    let underlineAt = -1;
+    let blankAt = -1;
     while (src) {
       let tok;
       let m;
@@ -643,13 +791,30 @@ class Md {
         continue;
       }
 
-      if ((tok = this.table(src))) {
+      if (tableCandidate(src) && (tok = this.table(src))) {
         src = src.substring(tok.raw.length);
         tokens.push(tok);
         continue;
       }
 
-      if ((m = B_LHEADING.exec(src))) {
+      // an lheading needs an underline before the first blank line
+      const off = whole.length - src.length;
+      if (underlineAt !== Infinity && underlineAt < off) {
+        SETEXT_UNDERLINE.lastIndex = off;
+        const u = SETEXT_UNDERLINE.exec(whole);
+        underlineAt = u ? u.index : Infinity;
+      }
+      let setext = underlineAt !== Infinity;
+      if (setext) {
+        if (blankAt !== Infinity && blankAt < off) {
+          BLANK_LINE_BREAK.lastIndex = off;
+          const b = BLANK_LINE_BREAK.exec(whole);
+          blankAt = b ? b.index : Infinity;
+        }
+        setext = underlineAt < blankAt;
+      }
+
+      if (setext && (m = B_LHEADING.exec(src))) {
         const raw = trimEndChar(m[0], '\n');
         src = src.substring(raw.length);
         const text = m[1].trim();
@@ -657,9 +822,10 @@ class Md {
         continue;
       }
 
-      if (this.top && (m = B_PARAGRAPH.exec(src))) {
-        const raw = m[0];
-        const text = m[1].charCodeAt(m[1].length - 1) === 10 ? m[1].slice(0, -1) : m[1];
+      if (this.top && c0 !== 10) {
+        const end = paragraphEnd(src);
+        const raw = end === src.length ? src : src.slice(0, end);
+        const text = raw;
         const tk = { type: 'paragraph', raw, text, entry: this.inline(text) };
         const last = tokens[tokens.length - 1];
         if (clipped && last !== undefined && last.type === 'paragraph') {
@@ -782,7 +948,7 @@ class Md {
       src = src.substring(cap[0].length);
       const first = firstLine(cap[2]);
       const markerWidth = cap[1].length;
-      let line = first.replace(R_LEADING_SPACE_TAB, (v) => expandTabs(v, markerWidth));
+      let line = expandLeading(first, markerWidth);
       let nextLine = firstLine(src);
       let blank = !line.trim();
       let indent;
@@ -803,17 +969,18 @@ class Md {
         while (src) {
           const rawLine = firstLine(src);
           nextLine = rawLine;
-          const expanded = nextLine.replace(R_LEADING_SPACE_TAB, (v) => expandTabs(v));
+          const expanded = expandLeading(nextLine, 0);
           if (
-            pr.fences.test(nextLine) ||
-            pr.heading.test(nextLine) ||
-            pr.html.test(nextLine) ||
-            pr.blockquote.test(nextLine) ||
-            pr.bullet.test(nextLine) ||
-            pr.hr.test(nextLine)
+            probeCandidate(nextLine) &&
+            (pr.fences.test(nextLine) ||
+              pr.heading.test(nextLine) ||
+              pr.html.test(nextLine) ||
+              pr.blockquote.test(nextLine) ||
+              pr.bullet.test(nextLine) ||
+              pr.hr.test(nextLine))
           )
             break;
-          if (expanded.search(R_NON_SPACE) >= indent || !nextLine.trim()) {
+          if (firstNonSpace(expanded) >= indent || !nextLine.trim()) {
             content += '\n' + expanded.slice(indent);
           } else {
             if (
@@ -1298,7 +1465,7 @@ class Md {
     let mask = ctx.masked;
     let l = here;
     while (l > 0 && mask[l - 1] === ch) l--;
-    const before = [...mask.slice(Math.max(0, l - 2), l)].at(-1) ?? '';
+    const before = codePointBefore(mask, l);
     const beforeIsPunct = before === '*' || before === '_' || !!I_PUNCTUATION.exec(before);
     if (l < here) prev = before;
     const prevPunct = l < here ? beforeIsPunct : !!I_PUNCTUATION.exec(prev);
@@ -1443,6 +1610,20 @@ class Md {
     }
     return out;
   }
+}
+
+/** B_TABLE needs a second line that opens with a delimiter row character after up to 3 spaces. */
+function tableCandidate(src) {
+  const nl = src.indexOf('\n');
+  if (nl === -1) return false;
+  let k = nl + 1;
+  let sp = 0;
+  while (sp < 3 && src.charCodeAt(k) === 32) {
+    k++;
+    sp++;
+  }
+  const d = src.charCodeAt(k);
+  return d === 124 || d === 58 || d === 45;
 }
 
 function cell(tag, align, html) {
