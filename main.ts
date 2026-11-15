@@ -4,7 +4,20 @@
 // kit's MAKEFUN_INPUT_DIR / MAKEFUN_OUTPUT_DIR) point elsewhere when run outside the container.
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { parse } from './parse.js';
+import { setFlagsFromString } from 'node:v8';
+
+// One run renders the set once, cold: TurboFan's compile time never pays for itself here, while
+// Maglev (tiered up a little earlier than by default) does. Set before parse.js is compiled; each
+// flag on its own, so a V8 that does not know one still takes the others.
+for (const flag of ['--no-opt', '--invocation-count-for-maglev=100']) {
+  try {
+    setFlagsFromString(flag);
+  } catch {
+    // an unknown flag only costs its speedup
+  }
+}
+
+const { parse } = (await import('./parse.js')) as { parse: (markdown: string) => string };
 
 type Case = { id: string; markdown: string };
 
