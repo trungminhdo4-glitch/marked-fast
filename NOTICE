@@ -1,0 +1,16 @@
+md-fast
+
+parse.js is a port of marked 18.1.3 (https://github.com/markedjs/marked, tag v18.1.3,
+commit ba50aa95636ac8f97f46446bbfeb04592ed22216), MIT licensed:
+
+  Copyright (c) 2018+, MarkedJS. (MIT License)
+  Copyright (c) 2011-2018, Christopher Jeffrey. (MIT License)
+
+Its block and inline grammar (the regular expressions and the order in which marked tries them)
+and the behaviour of its tokenizers are kept so that the output matches marked exactly; the lexer
+loop, the inline text scanner, the renderer and the data flow are rewritten. marked's LICENSE,
+which also carries the original Markdown notice (Copyright 2004, John Gruber), is kept unchanged
+in LICENSE-marked.
+
+No code of marked is executed or bundled at run time: marked is used only by the repository's
+test tools, loaded from a separately downloaded copy.
