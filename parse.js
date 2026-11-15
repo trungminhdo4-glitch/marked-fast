@@ -593,7 +593,24 @@ function ftpAt(s, i) {
  * Length of the plain-text run at the start of `s`: exactly what marked's gfm inline text regex
  * matches, written as a scanner (it is the hottest regex of all, and this one never backtracks).
  */
-function textRunLength(s) {
+//
+// The regex's lazy part stops at the first position q (from `pos` on) where one of these holds:
+//   d1  s[q] is one of \ < ! [ ` * ~ _, or "http"/"ftp://" (any case) or "www." after [\s*_~(] starts
+//   d2  s[q] is not a space and is followed by two or more spaces and a newline     -> ends at q + 1
+//   d3  s[q] is not alphanumeric and is followed by "mailto:" or "xmpp:"           -> ends at q + 1
+//   d4  s[q] is not an email char and is followed by `[email chars]+@`             -> ends at q + 1
+// Every firing position ends the run at q or q + 1, so the earliest end over all four is the answer.
+// d1-d3 are found by one native search (TEXT_STOP: each match index is where the run ends); d4 only
+// depends on where the '@' signs are.
+const TEXT_STOP =
+  /[\\<!\[`*~_]|[hH][tT][tT][pP]|[fF][tT][pP]:\/\/|(?<=[\s*_~(])www\.|(?<=[^ ]) {2,}\n|(?<=[^a-zA-Z0-9])(?:mailto|xmpp):/g;
+
+/**
+ * Length of the plain-text run at the start of `s`: exactly what marked's gfm inline text regex
+ * matches. `at` is the index of the first '@' in `s` at or after 1 (-1: none), which the caller
+ * tracks so that long paragraphs are not searched again for every run.
+ */
+function textRunLength(s, at = s.indexOf('@', 1)) {
   const n = s.length;
   let c = s.charCodeAt(0);
   if (!isAlnum(c) && mailSchemeAt(s, 1)) return 1;
@@ -603,45 +620,31 @@ function textRunLength(s) {
   c = s.charCodeAt(pos);
   if (c === 96 || c === 126) return pos;
   if (c === 32 && hardBreakAt(s, pos)) return pos;
+  if (at !== -1 && at < pos) at = s.indexOf('@', pos);
+  if (at > pos && emailRunStart(s, at, pos) === pos) return pos; // `(?=[email]+@)` right at pos
 
-  // `[email chars]+@` lookaheads: only the first '@' ahead matters, and only the start of the run of
-  // email characters that ends at it. `trigger` is the one position whose char ends the text there.
-  let at = s.indexOf('@', pos);
-  let trigger = -1;
-  if (at !== -1) {
-    const rs = emailRunStart(s, at, pos);
-    if (rs === pos && at > pos) return pos;
-    if (rs > pos && rs < at) trigger = rs - 1;
+  let end = n;
+  TEXT_STOP.lastIndex = pos;
+  let m;
+  while ((m = TEXT_STOP.exec(s)) !== null) {
+    // "mailto:" right at pos would be d3 for pos - 1, which the lazy part never looks at
+    if (m.index === pos && (m[0] === 'mailto:' || m[0] === 'xmpp:')) continue;
+    end = m.index;
+    break;
   }
 
-  for (let q = pos; q < n; q++) {
-    c = s.charCodeAt(q);
-    if (c < 128) {
-      if (CH_STOP[c] === 1) return q;
-      if (c === 104 || c === 72) {
-        if (httpAt(s, q)) return q;
-      } else if (c === 102 || c === 70) {
-        if (ftpAt(s, q)) return q;
-      } else if (c === 119 && s.startsWith('ww.', q + 1)) {
-        const b = s.charCodeAt(q - 1);
-        if (b === 42 || b === 95 || b === 126 || b === 40 || isJsSpace(b)) return q;
-      }
+  // d4: walk the '@' signs while they can still end the run earlier
+  let lo = pos;
+  while (at !== -1 && lo < end) {
+    const rs = emailRunStart(s, at, lo);
+    if (rs < at) {
+      if (rs > lo) return rs < end ? rs : end;
+      if (lo > pos) return lo < end ? lo : end;
     }
-    const d = s.charCodeAt(q + 1);
-    if (d === 32 && c !== 32 && hardBreakAt(s, q + 1)) return q + 1;
-    if ((d === 109 || d === 120) && !isAlnum(c) && mailSchemeAt(s, q + 1)) return q + 1;
-    if (q === trigger) return q + 1;
-    if (q === at) {
-      at = s.indexOf('@', q + 1);
-      trigger = -1;
-      if (at !== -1) {
-        const rs = emailRunStart(s, at, q + 1);
-        if (rs === q + 1 && at > q + 1) return q + 1; // this '@' is followed by `[email]+@`
-        if (rs > q + 1 && rs < at) trigger = rs - 1;
-      }
-    }
+    lo = at + 1;
+    at = s.indexOf('@', lo);
   }
-  return n;
+  return end;
 }
 
 /** Start of the run of email characters that ends at `at`, not going below `lo`. */
@@ -674,6 +677,7 @@ function urlPossible(s) {
 class Md {
   constructor() {
     this.links = Object.create(null);
+    this.defs = 0;
     this.queue = [];
     this.inLink = false;
     this.inRawBlock = false;
@@ -785,7 +789,10 @@ class Md {
           last.text += '\n' + tok.raw;
           this.queue[this.queue.length - 1].src = last.text;
         } else {
-          if (!links[tok.tag]) links[tok.tag] = { href: tok.href, title: tok.title };
+          if (!links[tok.tag]) {
+            links[tok.tag] = { href: tok.href, title: tok.title };
+            this.defs++;
+          }
           tokens.push(tok);
         }
         continue;
@@ -1097,7 +1104,8 @@ class Md {
   mask(src) {
     let out = src;
     const links = this.links;
-    if (src.includes('[')) {
+    // with no definitions every reference keeps its text; the other two only touch what they match
+    if (this.defs > 0 && src.includes('[')) {
       const swap = (r) => {
         const o = r.lastIndexOf('[');
         if (!Object.hasOwn(links, normalizeLabel(r.slice(o + 1, -1)))) return r;
@@ -1114,7 +1122,7 @@ class Md {
         esc ? '+'.repeat(all.length) : ticks ? ticks + all.slice(ticks.length, -ticks.length).replace(/`/g, '+') + ticks : all,
       );
     }
-    if (out.includes('[') || out.includes('`') || out.includes('<')) {
+    if (out.includes('](') || out.includes('`') || out.includes('<')) {
       out = out.replace(I_BLOCK_SKIP, (all) => '[' + 'a'.repeat(all.length - 2) + ']');
     }
     return out;
@@ -1148,7 +1156,7 @@ class Md {
   inlineLoop(src, plain) {
     const whole = src;
     const delims = src.includes('*') || src.includes('_') || src.includes('~');
-    const ctx = { whole, masked: null, closers: null };
+    const ctx = { whole, masked: null, closers: null, at: 0 };
     let out = '';
     let pend = '';
     let pendOn = false;
@@ -1275,7 +1283,10 @@ class Md {
       }
 
       // plain text up to the next possible token
-      len = textRunLength(src);
+      const off = whole.length - src.length;
+      let at = ctx.at;
+      if (at !== -1 && at < off + 1) at = ctx.at = whole.indexOf('@', off + 1);
+      len = textRunLength(src, at === -1 ? -1 : at - off);
       const raw = len === src.length ? src : src.slice(0, len);
       src = src.substring(len);
       const last = raw.charAt(raw.length - 1);
@@ -1436,19 +1447,8 @@ class Md {
   closersOf(ctx) {
     if (ctx.closers === null) {
       const masked = this.mask(ctx.whole);
-      const last = { '*': -1, _: -1, '~': -1 };
-      const n = masked.length;
-      for (let s = 0; s < n; s++) {
-        const ch = masked[s];
-        if (ch !== '*' && ch !== '_' && ch !== '~') continue;
-        const before = s === 0 ? '\n' : masked[s - 1];
-        let i = s + 1;
-        while (i < n && masked[i] === ch) i++;
-        if (before !== ' ' && before !== '\t' && before !== '\n' && before !== '\r' && before !== '\f') last[ch] = s;
-        s = i - 1;
-      }
       ctx.masked = masked;
-      ctx.closers = last;
+      ctx.closers = { '*': lastCloserRun(masked, '*'), _: lastCloserRun(masked, '_'), '~': lastCloserRun(masked, '~') };
     }
     return ctx.closers;
   }
@@ -1610,6 +1610,23 @@ class Md {
     }
     return out;
   }
+}
+
+/**
+ * Start of the last maximal run of `ch` in `s` that does not follow whitespace (or -1): the last
+ * place an emphasis or strikethrough could close. Searched from the end instead of scanning all.
+ */
+function lastCloserRun(s, ch) {
+  let k = s.lastIndexOf(ch);
+  while (k !== -1) {
+    let st = k;
+    while (st > 0 && s[st - 1] === ch) st--;
+    if (st === 0) return -1; // a run at the very start follows the implied newline
+    const b = s[st - 1];
+    if (b !== ' ' && b !== '\t' && b !== '\n' && b !== '\r' && b !== '\f') return st;
+    k = s.lastIndexOf(ch, st - 1);
+  }
+  return -1;
 }
 
 /** B_TABLE needs a second line that opens with a delimiter row character after up to 3 spaces. */

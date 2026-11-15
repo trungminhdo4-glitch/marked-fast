@@ -105,5 +105,26 @@ for (let i = 0; i < N / 10; i++) {
   }
   if (want !== got) fail('doc', JSON.stringify(md) + '\n  want ' + JSON.stringify(want) + '\n  got  ' + JSON.stringify(got));
 }
-console.log(`documents checked; ${failures} failure(s)`);
+console.log('documents checked');
+
+// 4. line soup: paragraphs interrupted (or not) by every kind of line start, emails, setext lines
+const starts = ['', '', '', ' ', '  ', '   ', '    ', '\t', '> ', '- ', '* ', '+ ', '1. ', '1) ', '2. ', '# ', '###### ', '####### ',
+  '```', '~~~', '<div>', '<span>', '<!--', '<?', '<!X', '| ', ':', '-', '--', '---', '***', '___', '===', '= =', '[x]: /u', '[ ] '];
+const words = ['word', 'a@b.co', 'x', '*em*', '_u_', '`c`', '[l](u)', '|', ' | ', 'www.a.b', 'http://h', '\\*', '&#33;', '  ', 'mailto:a@b.c',
+  '<b>', '**', '~~s~~', ':-:', '---|---', '1.', '#', '>'];
+for (let i = 0; i < N / 10; i++) {
+  let md = '';
+  const lines = 1 + Math.floor(rand() * 10);
+  for (let k = 0; k < lines; k++) {
+    let line = pick(starts);
+    const w = Math.floor(rand() * 5);
+    for (let j = 0; j < w; j++) line += (j ? ' ' : '') + pick(words);
+    md += line + (rand() < 0.15 ? '\n\n' : '\n');
+  }
+  if (rand() < 0.3) md = md.slice(0, -1);
+  const want = marked.parse(md);
+  const got = parse(md);
+  if (want !== got) fail('lines', JSON.stringify(md) + '\n  want ' + JSON.stringify(want) + '\n  got  ' + JSON.stringify(got));
+}
+console.log(`line soup checked; ${failures} failure(s)`);
 process.exitCode = failures ? 1 : 0;
