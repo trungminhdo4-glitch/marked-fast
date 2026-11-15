@@ -69,6 +69,21 @@ for (let i = 0; i < N; i++) {
 }
 console.log('text scanner checked');
 
+// 2b. escaping, against marked's two escape regexes
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const refEsc = (s, strict) =>
+  strict ? s.replace(/[&<>"']/g, (c) => ESC_MAP[c]) : s.replace(/[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g, (c) => ESC_MAP[c]);
+const escAlphabet = ['&', '#', 'x', 'X', '1', '9', 'a', 'F', 'g', '_', ';', '<', '>', '"', "'", ' ', 'amp', '12345678', '1234567', 'é'];
+for (let i = 0; i < N; i++) {
+  let s = '';
+  const len = Math.floor(rand() * 12);
+  for (let k = 0; k < len; k++) s += pick(escAlphabet);
+  for (const strict of [false, true]) {
+    if (internals.esc(s, strict) !== refEsc(s, strict)) fail('esc', JSON.stringify(s) + ' strict=' + strict);
+  }
+}
+console.log('escaping checked');
+
 // 3. whole documents
 const blocks = [
   '# head', '## head ##', 'Setext\n===', 'Setext\n---', '---', '***', '- item', '* item', '+ item', '1. item', '2) item',

@@ -1,6 +1,9 @@
 // Compares parse.js with the practice reference case by case and times it.
 //
-//   node tools/check.mjs <kit dir> [--runs N] [--show N]
+//   node tools/check.mjs <kit dir> [--runs N] [--show N] [--set <dir>]
+//
+// --set takes another drawn instance (<dir>/input/cases.json, <dir>/reference/expected.json), such as
+// one the kit's generator drew from a seed of your own, in place of the practice set.
 //
 // <kit dir> is the unpacked competition kit (practice/input/cases.json, practice/reference/expected.json).
 // Prints how many cases match, the first differing cases with the position of the first difference,
@@ -20,8 +23,10 @@ const opt = (name, def) => {
 const runs = opt('--runs', 3);
 const show = opt('--show', 5);
 
-const cases = JSON.parse(readFileSync(join(kit, 'practice/input/cases.json'), 'utf8'));
-const expected = JSON.parse(readFileSync(join(kit, 'practice/reference/expected.json'), 'utf8')).cases;
+const si = args.indexOf('--set');
+const set = si === -1 ? join(kit, 'practice') : resolve(args[si + 1]);
+const cases = JSON.parse(readFileSync(join(set, 'input/cases.json'), 'utf8'));
+const expected = JSON.parse(readFileSync(join(set, 'reference/expected.json'), 'utf8')).cases;
 
 const { parse } = await import(pathToFileURL(resolve(import.meta.dirname, '../parse.js')).href);
 

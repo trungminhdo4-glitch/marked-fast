@@ -263,10 +263,6 @@ const R_END_RAW = /^<\/(pre|code|kbd|script)(\s|>)/i;
 const R_ALNUM_UNICODE = /[\p{L}\p{N}]/u;
 const R_NUM_REF = /&#(?:(\d{1,7})|[Xx]([A-Fa-f0-9]{1,6}));/;
 const R_NUM_REF_OR_AMP = /&#(?:(\d{1,7})|[Xx]([A-Fa-f0-9]{1,6}));|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g;
-const R_ESC_TEST = /[&<>"']/;
-const R_ESC = /[&<>"']/g;
-const R_ESC_TEST_SOFT = /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/;
-const R_ESC_SOFT = /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g;
 const R_CRLF = /\r\n|\r/g;
 const R_WS_RUN = /\s+/g;
 const R_LIST_SETEXT_LINE = /^ {0,3}(?:=+|-+) *$/;
@@ -299,17 +295,53 @@ const ITEM_PAREN = itemRegex('\\d{1,9}\\)');
 // ---------------------------------------------------------------------------------------------
 // String helpers
 
-const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-const escChar = (ch) => ESC_MAP[ch];
 
-/** marked's escape(): `strict` escapes every &, otherwise entities and numeric references survive. */
+/**
+ * marked's escape(): `strict` escapes every &, otherwise an & that starts an entity or a numeric
+ * reference (`&(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);`) is kept. One pass, slices between hits.
+ */
 function esc(s, strict) {
-  if (strict) {
-    if (R_ESC_TEST.test(s)) return s.replace(R_ESC, escChar);
-  } else if (R_ESC_TEST_SOFT.test(s)) {
-    return s.replace(R_ESC_SOFT, escChar);
+  const n = s.length;
+  let out = '';
+  let last = 0;
+  for (let i = 0; i < n; i++) {
+    const c = s.charCodeAt(i);
+    if (c > 62 || CH_ESC[c] === 0) continue;
+    let rep;
+    if (c === 38) {
+      if (!strict && entityAt(s, i + 1)) continue;
+      rep = '&amp;';
+    } else rep = c === 60 ? '&lt;' : c === 62 ? '&gt;' : c === 34 ? '&quot;' : '&#39;';
+    out += last === i ? rep : s.slice(last, i) + rep;
+    last = i + 1;
   }
-  return s;
+  return last === 0 ? s : last === n ? out : out + s.slice(last);
+}
+const CH_ESC = new Uint8Array(63);
+for (const ch of '&<>"\'') CH_ESC[ch.charCodeAt(0)] = 1;
+
+const isWordChar = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
+const isDigit = (c) => c >= 48 && c <= 57;
+const isHex = (c) => isDigit(c) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102);
+
+/** `(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);` at i */
+function entityAt(s, i) {
+  let j = i;
+  if (s.charCodeAt(j) === 35) {
+    j++;
+    const x = s.charCodeAt(j);
+    if (x === 88 || x === 120) {
+      const st = ++j;
+      while (isHex(s.charCodeAt(j))) j++;
+      if (j - st >= 1 && j - st <= 6 && s.charCodeAt(j) === 59) return true;
+      j = i + 1;
+    }
+    const st = j;
+    while (isDigit(s.charCodeAt(j))) j++;
+    return j - st >= 1 && j - st <= 7 && s.charCodeAt(j) === 59;
+  }
+  while (isWordChar(s.charCodeAt(j))) j++;
+  return j > i && s.charCodeAt(j) === 59;
 }
 
 /** Decodes numeric character references in inline text (and turns stray & into &amp; then). */
@@ -1669,6 +1701,7 @@ export function parse(markdown) {
 // exported for the repository's own regex and scanner checks (tools/)
 export const internals = {
   textRunLength,
+  esc,
   regexes: {
     block: {
       newline: B_NEWLINE, code: B_CODE, fences: B_FENCES, hr: B_HR, heading: B_HEADING, lheading: B_LHEADING,
