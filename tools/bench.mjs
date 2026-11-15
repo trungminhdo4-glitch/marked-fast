@@ -61,6 +61,8 @@ const nullRun = (() => {
   }
   return median(t);
 })();
+const min = (x) => Math.min(...x);
+console.log(`min of ${runs} runs (ms CPU): md-fast ${min(times['md-fast']).toFixed(0)}, marked ${min(times.marked).toFixed(0)}`);
 const a = median(times['md-fast']);
 const b = median(times.marked);
 console.log(`median of ${runs} runs (ms CPU): md-fast ${a.toFixed(0)}, marked ${b.toFixed(0)}, empty node ${nullRun.toFixed(0)}`);

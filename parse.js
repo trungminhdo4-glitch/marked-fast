@@ -1461,6 +1461,12 @@ class Md {
     const sameAsPrev = prev === ch;
     const whole = ctx.whole; // the mask has the same length as the source
     const here = whole.length - src.length;
+    if (here === 0 || whole.charCodeAt(here - 1) !== ch.charCodeAt(0)) {
+      // The mask never creates delimiter characters, so no run of `ch` ends right before here and
+      // marked's early refusals only depend on the previous character: decide them without the mask.
+      if (m[4] && prev.match(R_ALNUM_UNICODE)) return undefined;
+      if ((m[1] || m[3]) && prev && !I_PUNCTUATION.exec(prev)) return undefined;
+    }
     const closers = this.closersOf(ctx);
     let mask = ctx.masked;
     let l = here;
