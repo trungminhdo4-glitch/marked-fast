@@ -363,6 +363,7 @@ const ITEM_PAREN = itemRegex('\\d{1,9}\\)');
  * loop is slow, so the work is left to native searches and replaces.
  */
 const R_ESC_ANY = /[&<>"']/;
+const R_ESC_NEXT = /[&<>"']/g;
 function esc(s, strict) {
   const first = s.search(R_ESC_ANY);
   if (first === -1) return s;
@@ -1371,6 +1372,8 @@ class Md {
     let pendRaw = false;
     let pendLazy = false;
     let pendStart = 0;
+    // the next character esc() would rewrite, at or after the pending range (-2: not looked up)
+    let escAt = -2;
     let prevText = false;
     let prevChar = '';
 
@@ -1485,8 +1488,15 @@ class Md {
 
       if (html !== undefined) {
         if (pendOn) {
-          const p = pendLazy ? whole.slice(pendStart, whole.length - src.length) : pend;
-          out += plain || pendRaw ? p : esc(p);
+          if (pendLazy) {
+            const end = whole.length - src.length;
+            if (escAt !== -1 && escAt < pendStart) {
+              R_ESC_NEXT.lastIndex = pendStart;
+              escAt = R_ESC_NEXT.test(whole) ? R_ESC_NEXT.lastIndex - 1 : -1;
+            }
+            const p = whole.slice(pendStart, end);
+            out += plain || pendRaw || escAt === -1 || escAt >= end ? p : esc(p);
+          } else out += plain || pendRaw ? pend : esc(pend);
           pendOn = false;
         }
         out += html;
@@ -1532,9 +1542,16 @@ class Md {
       } else pend += text;
     }
     if (pendOn) {
-      const p = pendLazy ? whole.slice(pendStart) : pend;
-      out += plain || pendRaw ? p : esc(p);
+      if (pendLazy) {
+        if (escAt !== -1 && escAt < pendStart) {
+          R_ESC_NEXT.lastIndex = pendStart;
+          escAt = R_ESC_NEXT.test(whole) ? R_ESC_NEXT.lastIndex - 1 : -1;
+        }
+        const p = pendStart === 0 ? whole : whole.slice(pendStart);
+        out += plain || pendRaw || escAt === -1 ? p : esc(p);
+      } else out += plain || pendRaw ? pend : esc(pend);
     }
+    R_ESC_NEXT.lastIndex = 0;
     return out;
   }
 
