@@ -6,6 +6,7 @@
 // Runs this repository's main.ts and the kit's baseline (marked) alternately (in turns, each going
 // first every other run) on the practice input,
 // checks that both outputs equal the reference, and prints the median CPU time of each.
+// Medians of a few runs are noisy: use 15 runs or more before trusting a difference of a few ms.
 
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';

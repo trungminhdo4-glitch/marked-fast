@@ -102,6 +102,7 @@ node tools/check.mjs <kit dir>                 # practice set: identical cases +
 node tools/fuzz.mjs <kit dir> --n 50000        # differential fuzzing against marked
 node tools/bench.mjs <kit dir> --runs 15       # fresh-process CPU time, md-fast vs marked
 npm run check / npm run fuzz / npm run bench   # the same with the kit next to this repo
+npm run bench-quick                            # 5 runs only: a quick look, too noisy to compare
 ```
 
 The tools load marked from the competition kit; nothing of marked is shipped or run by `main.ts`.

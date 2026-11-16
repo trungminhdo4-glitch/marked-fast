@@ -10,3 +10,6 @@ sets/
 *.heapprofile
 # `npm pack` output: the entry is the repository at one commit, never a tarball
 *.tgz
+# editor swap and backup files
+*.swp
+*~

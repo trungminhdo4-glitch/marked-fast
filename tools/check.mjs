@@ -11,6 +11,7 @@
 // and the CPU time of rendering every case (best of --runs), next to marked's when the kit's
 // baselines/vendor/marked/marked.esm.js is there. PARSE=<file> checks another copy of parse.js (an
 // experiment kept outside the repository) instead of this one, as tools/fuzz.mjs does.
+// Exit code 1 when any case differs from the reference.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';

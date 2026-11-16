@@ -10,6 +10,7 @@
 // Deterministic for a given seed; prints the first counterexamples it finds. PARSE=<file> checks
 // another copy of parse.js (to see that a known-bad version fails).
 // Exit code 1 when any section found a difference, so `npm run fuzz` can gate a commit.
+// Try another --seed (npm run fuzz-alt uses 7) to cover different random inputs.
 
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';

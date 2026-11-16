@@ -2,4 +2,5 @@
 # must not depend on how the checkout was made
 * text=auto eol=lf
 # the licence texts too: LICENSE-marked has to stay byte for byte marked's file
+# tools/*.mjs and main.ts are text as well; nothing in the repository is binary
 # .makefun/owner.json is make.fun's file: one line, committed as received, never reformatted

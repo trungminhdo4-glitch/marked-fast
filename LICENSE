@@ -1,6 +1,7 @@
 SPDX-License-Identifier: MIT
 (Covers md-fast's own code; marked's licence, which applies to the port in parse.js, is LICENSE-marked;
 NOTICE says which marked release and commit parse.js follows.)
+(main.ts and tools/ are md-fast's own code and fall under this licence alone.)
 
 MIT License
 

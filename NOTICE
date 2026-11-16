@@ -19,3 +19,4 @@ That copy is the one the competition kit vendors (baselines/vendor/marked/marked
 Where parse.js replaces one of marked's regular expressions or replace() calls by a scanner or an
 index walk, the replaced expression is named in a comment next to it, so each can be checked
 against marked's source.
+tools/fuzz.mjs checks the regular expressions parse.js still composes against marked's, source and flags.

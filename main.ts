@@ -14,6 +14,7 @@ import { setFlagsFromString } from 'node:v8';
 // instead of first to bytecode and again after its first run (the cold spec cases: ~25% less).
 // Round 4: GC flags (--no-concurrent-marking and kin) must not be set here: changed at run time
 // they can abort V8 with a failed check; --single-threaded(-gc) measured no different.
+// Round 6: flags unchanged; this list is what every earlier round measured as best.
 for (const flag of ['--no-opt', '--invocation-count-for-maglev=100', '--no-regexp-tier-up']) {
   try {
     setFlagsFromString(flag);

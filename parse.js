@@ -15,6 +15,7 @@
 //   - setext headings, tables and paragraphs are pre-screened before their expensive regexes run.
 // Nothing is cached across calls: parse() builds all of its state per call.
 // Plain ES2022 only: the harness runs Node 22, so nothing here may need a newer Node or V8.
+// The only export is parse(markdown); tools/check.mjs and tools/fuzz.mjs call nothing else.
 
 // ---------------------------------------------------------------------------------------------
 // Regex construction (mirrors how marked composes its grammar so the sources come out identical)
