@@ -276,6 +276,53 @@ function blockFill(all) {
   return f;
 }
 
+const PLUSES = '+++';
+const AS = 'a'.repeat(1024);
+
+/**
+ * `s.replace(I_ANY_PUNCT_OUTSIDE_CODE, (all, ticks, esc) => esc ? '+'.repeat(all.length) : ticks ?
+ * ticks + all.slice(ticks.length, -ticks.length).replace(/`/g, '+') + ticks : all)` without the
+ * callback: only the matches that change something are rewritten.
+ */
+function maskEscapes(s) {
+  const re = I_ANY_PUNCT_OUTSIDE_CODE;
+  re.lastIndex = 0;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const all = m[0];
+    let rep;
+    if (m[2] !== undefined) rep = PLUSES.slice(0, all.length);
+    else {
+      const ticks = m[1];
+      if (ticks === undefined) continue;
+      const t = ticks.length;
+      // a code span whose body holds no backtick stays as it is
+      if (all.indexOf('`', t) >= all.length - t) continue;
+      rep = ticks + all.slice(t, -t).replace(/`/g, '+') + ticks;
+    }
+    out += s.slice(last, m.index) + rep;
+    last = m.index + all.length;
+  }
+  return last === 0 ? s : out + s.slice(last);
+}
+
+/** `s.replace(I_BLOCK_SKIP, blockFill)` without the callback. */
+function maskSpans(s) {
+  const re = I_BLOCK_SKIP;
+  re.lastIndex = 0;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const n = m[0].length;
+    out += s.slice(last, m.index) + (n - 2 <= AS.length ? '[' + AS.slice(0, n - 2) + ']' : blockFill(m[0]));
+    last = m.index + n;
+  }
+  return last === 0 ? s : out + s.slice(last);
+}
+
 // emphasis fast path: where a span of the mask can start, the delimiters the right regexes look for,
 // and the answer of a closer search that left the part where the source equals the mask
 const R_MASK_START = /[\[`\\<]/;
@@ -521,6 +568,27 @@ function hasAlnum(s) {
   return R_ALNUM_UNICODE.test(s);
 }
 
+/** `[...s][0].length` for a non-empty `s` */
+function firstCodePointLength(s) {
+  const c = s.charCodeAt(0);
+  if (c >= 0xd800 && c <= 0xdbff && s.length > 1) {
+    const d = s.charCodeAt(1);
+    if (d >= 0xdc00 && d <= 0xdfff) return 2;
+  }
+  return 1;
+}
+
+/** `[...s].at(-1).length` for a non-empty `s` */
+function lastCodePointLength(s) {
+  const n = s.length;
+  const c = s.charCodeAt(n - 1);
+  if (c >= 0xdc00 && c <= 0xdfff && n > 1) {
+    const d = s.charCodeAt(n - 2);
+    if (d >= 0xd800 && d <= 0xdbff) return 2;
+  }
+  return 1;
+}
+
 function firstLine(s) {
   const i = s.indexOf('\n');
   return i === -1 ? s : s.slice(0, i);
@@ -681,13 +749,26 @@ function textRunLength(s, at = s.indexOf('@', 1)) {
 
   let end = n;
   TEXT_STOP.lastIndex = pos;
-  let m;
-  while ((m = TEXT_STOP.exec(s)) !== null) {
-    // "mailto:" right at pos would be d3 for pos - 1, which the lazy part never looks at
-    if (m.index === pos && (m[0] === 'mailto:' || m[0] === 'xmpp:')) continue;
-    end = m.index;
+  // test() instead of exec(): no match array; where the match starts follows from how it ends
+  while (TEXT_STOP.test(s)) {
+    const e = TEXT_STOP.lastIndex;
+    const z = s.charCodeAt(e - 1);
+    let st;
+    if (z === 10) {
+      // ` {2,}\n` after a non-space: from the first space of the run
+      st = e - 1;
+      while (s.charCodeAt(st - 1) === 32) st--;
+    } else if (z === 58) {
+      // "mailto:" or "xmpp:"; right at pos it would be d3 for pos - 1, which the lazy part never looks at
+      st = e >= 7 && s.startsWith('mailto:', e - 7) ? e - 7 : e - 5;
+      if (st === pos) continue;
+    } else if (z === 46 || z === 112 || z === 80) st = e - 4; // "www.", "http"
+    else if (z === 47) st = e - 6; // "ftp://"
+    else st = e - 1; // one of \ < ! [ ` * ~ _
+    end = st;
     break;
   }
+  TEXT_STOP.lastIndex = 0;
 
   // d4: walk the '@' signs while they can still end the run earlier
   let lo = pos;
@@ -738,7 +819,6 @@ class Md {
     this.inLink = false;
     this.inRawBlock = false;
     this.linkEmitted = false;
-    this.linkParenPossible = true;
     this.top = true;
   }
 
@@ -1172,17 +1252,31 @@ class Md {
         }
         return '[' + 'a'.repeat(r.length - 2) + ']';
       };
-      out = out.replace(I_REFLINK_SEARCH, swap);
+      // `out.replace(I_REFLINK_SEARCH, swap)`, calling back only for the defined references; swap's
+      // own searches (a replace, matchAll) start from lastIndex 0, as inside a replace callback
+      const re = I_REFLINK_SEARCH;
+      re.lastIndex = 0;
+      let acc = '';
+      let last = 0;
+      let m;
+      while ((m = re.exec(src)) !== null) {
+        const r = m[0];
+        const o = r.lastIndexOf('[');
+        if (!Object.hasOwn(links, normalizeLabel(r.slice(o + 1, -1)))) continue;
+        const next = re.lastIndex;
+        re.lastIndex = 0;
+        const rep = swap(r);
+        re.lastIndex = next;
+        acc += src.slice(last, m.index) + rep;
+        last = m.index + r.length;
+      }
+      if (last !== 0) out = acc + src.slice(last);
     }
     // This pass only rewrites escapes and backticks inside code spans. With single-tick fences a
     // code span holds no backtick (the lazy body would have ended at a lone one), so without a
     // backslash and without '``' it changes nothing.
-    if (out.includes('\\') || out.includes('``')) {
-      out = out.replace(I_ANY_PUNCT_OUTSIDE_CODE, (all, ticks, esc) =>
-        esc ? '+'.repeat(all.length) : ticks ? ticks + all.slice(ticks.length, -ticks.length).replace(/`/g, '+') + ticks : all,
-      );
-    }
-    if (out.includes('](') || out.includes('`') || out.includes('<')) out = out.replace(I_BLOCK_SKIP, blockFill);
+    if (out.includes('\\') || out.includes('``')) out = maskEscapes(out);
+    if (out.includes('](') || out.includes('`') || out.includes('<')) out = maskSpans(out);
     return out;
   }
 
@@ -1202,22 +1296,22 @@ class Md {
 
   /** Lexes and renders inline markdown; `plain` renders the text-only form used for alt text. */
   inlineTokens(src, plain) {
-    const parenBefore = this.linkParenPossible;
-    this.linkParenPossible = parenBefore && src.includes(')');
-    // no try/finally: nothing inside catches, so a throw ends the whole parse() and its Md with it
-    const html = this.inlineLoop(src, plain);
-    this.linkParenPossible = parenBefore;
-    return html;
+    return this.inlineLoop(src, plain);
   }
 
   inlineLoop(src, plain) {
     const whole = src;
-    const delims = src.includes('*') || src.includes('_') || src.includes('~');
-    const ctx = { whole, masked: null, closers: null, at: 0, safe: -2 };
+    const ctx = { whole, masked: null, closers: null, at: 0, amp: -2, safe: -2 };
+    // An inline link needs a ')' after its '[': the last one in the source, looked up on first use.
+    let parenAt = -2;
     let out = '';
+    // Pending plain text, escaped when the next token (or the end) comes. While it is the source
+    // itself (no reference was decoded in it), it is kept as the range pendStart..here of `whole`.
     let pend = '';
     let pendOn = false;
     let pendRaw = false;
+    let pendLazy = false;
+    let pendStart = 0;
     let prevText = false;
     let prevChar = '';
 
@@ -1258,18 +1352,18 @@ class Md {
         case 33: // !
         case 91: {
           // [
-          let r = this.link(src, plain);
+          if (parenAt === -2) parenAt = whole.lastIndexOf(')');
+          let r = parenAt > whole.length - src.length ? this.link(src, plain) : undefined;
           if (r === undefined) {
             r = this.reflink(src, plain);
             if (r !== undefined && r.text !== undefined) {
-              // an unresolved reference: its bracket is plain text
-              len = 1;
-              if (pendOn) pend += r.text;
-              else {
-                pend = r.text;
+              // an unresolved reference: its bracket (the source's own character) is plain text
+              if (!pendOn) {
                 pendOn = true;
                 pendRaw = false;
-              }
+                pendLazy = true;
+                pendStart = whole.length - src.length;
+              } else if (!pendLazy) pend += r.text;
               src = src.substring(1);
               continue;
             }
@@ -1283,7 +1377,7 @@ class Md {
         case 42: // *
         case 95: {
           // _
-          const r = delims ? this.emStrong(src, ctx, prevChar, plain) : undefined;
+          const r = this.emStrong(src, ctx, prevChar, plain);
           if (r !== undefined) {
             len = r.len;
             html = r.html;
@@ -1312,7 +1406,7 @@ class Md {
           break;
         case 126: {
           // ~
-          const r = delims ? this.del(src, ctx, prevChar, plain) : undefined;
+          const r = this.del(src, ctx, prevChar, plain);
           if (r !== undefined) {
             len = r.len;
             html = r.html;
@@ -1331,7 +1425,8 @@ class Md {
 
       if (html !== undefined) {
         if (pendOn) {
-          out += plain || pendRaw ? pend : esc(pend);
+          const p = pendLazy ? whole.slice(pendStart, whole.length - src.length) : pend;
+          out += plain || pendRaw ? p : esc(p);
           pendOn = false;
         }
         out += html;
@@ -1344,20 +1439,42 @@ class Md {
       let at = ctx.at;
       if (at !== -1 && at < off + 1) at = ctx.at = whole.indexOf('@', off + 1);
       len = textRunLength(src, at === -1 ? -1 : at - off);
-      const raw = len === src.length ? src : src.slice(0, len);
-      src = src.substring(len);
-      const last = raw.charAt(raw.length - 1);
+      const last = src.charAt(len - 1);
       if (last !== '_') prevChar = last;
       prevText = true;
-      const text = this.inRawBlock ? raw : decodeNumeric(raw);
-      if (pendOn) pend += text;
+      // a numeric reference to decode needs its '&#' inside the run (the next one is tracked)
+      let amp = ctx.amp;
+      if (amp !== -1 && amp < off) amp = ctx.amp = whole.indexOf('&#', off);
+      let raw;
+      let text;
+      if (amp === -1 || amp + 1 >= off + len || this.inRawBlock) text = raw = null;
       else {
+        raw = len === src.length ? src : src.slice(0, len);
+        text = decodeNumeric(raw);
+      }
+      src = src.substring(len);
+      if (text === raw) {
+        // the run is the source itself
+        if (!pendOn) {
+          pendOn = true;
+          pendRaw = this.inRawBlock;
+          pendLazy = true;
+          pendStart = off;
+        } else if (!pendLazy) pend += whole.slice(off, off + len);
+      } else if (!pendOn) {
         pend = text;
         pendOn = true;
         pendRaw = this.inRawBlock;
-      }
+        pendLazy = false;
+      } else if (pendLazy) {
+        pend = whole.slice(pendStart, off) + text;
+        pendLazy = false;
+      } else pend += text;
     }
-    if (pendOn) out += plain || pendRaw ? pend : esc(pend);
+    if (pendOn) {
+      const p = pendLazy ? whole.slice(pendStart) : pend;
+      out += plain || pendRaw ? p : esc(p);
+    }
     return out;
   }
 
@@ -1389,7 +1506,6 @@ class Md {
   }
 
   link(src, plain) {
-    if (this.linkParenPossible === false) return undefined;
     const m = I_LINK.exec(src);
     if (!m) return undefined;
     const off = m[0].charAt(0) === '!' ? 2 : 1;
@@ -1524,7 +1640,7 @@ class Md {
       if (m[4] && hasAlnum(prev)) return undefined;
       if ((m[1] || m[3]) && prev && !isPunct(prev)) return undefined;
     }
-    const lLen = [...m[0]].length - 1;
+    const lLen = m[0].length - lastCodePointLength(m[0]);
     const from = here + lLen;
     // Fast path: below ctx.safe the mask equals the source, so it is not built while the left side
     // and the closer search stay there (see emScan); the left side only reads before `here`.
@@ -1579,7 +1695,7 @@ class Md {
       if (m.index > limit) break;
       const run = m[1] || m[2] || m[3] || m[4] || m[5] || m[6];
       if (!run) continue;
-      let rLen = [...run].length;
+      let rLen = run.length; // a run of one ASCII delimiter
       if (m[3] || m[4]) {
         need += rLen;
         continue;
@@ -1593,7 +1709,7 @@ class Md {
       need -= rLen;
       if (need > 0) continue;
       rLen = Math.min(rLen, rLen + need + skipped);
-      const lead = [...m[0]][0].length;
+      const lead = firstCodePointLength(m[0]);
       const raw = src.slice(0, lLen + m.index + lead + rLen);
       if (Math.min(lLen, rLen) % 2) {
         const inner = this.inlineTokens(raw.slice(1, -1), plain);
@@ -1622,7 +1738,7 @@ class Md {
     if (!m) return undefined;
     const leftPunct = m[1] || '';
     if (leftPunct && prevChar && !isPunct(prevChar)) return undefined;
-    const lLen = [...m[0]].length - 1;
+    const lLen = m[0].length - lastCodePointLength(m[0]);
     const here = ctx.whole.length - src.length;
     const from = here + lLen;
     // fast path as in emStrong; I_DEL_RIGHT has no lazy alternative that could read past its match
@@ -1646,7 +1762,7 @@ class Md {
       if (m.index > limit) break;
       const run = m[1] || m[2] || m[3] || m[4] || m[5] || m[6];
       if (!run) continue;
-      let rLen = [...run].length;
+      let rLen = run.length; // a run of one ASCII delimiter
       if (rLen !== lLen) continue;
       if (m[3] || m[4]) {
         need += rLen;
@@ -1655,7 +1771,7 @@ class Md {
       need -= rLen;
       if (need > 0) continue;
       rLen = Math.min(rLen, rLen + need);
-      const lead = [...m[0]][0].length;
+      const lead = firstCodePointLength(m[0]);
       const raw = src.slice(0, lLen + m.index + lead + rLen);
       const inner = this.inlineTokens(raw.slice(lLen, -lLen), plain);
       return { len: raw.length, html: plain ? inner : `<del>${inner}</del>` };
