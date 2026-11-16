@@ -5,3 +5,6 @@ profiles/
 out/
 # bench and trace logs
 *.log
+# generated test sets (the kit's generator, own seeds) and heap profiles
+sets/
+*.heapprofile

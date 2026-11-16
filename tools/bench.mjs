@@ -80,3 +80,5 @@ const trimmed = (x) => {
   return kept.reduce((p, q) => p + q, 0) / kept.length;
 };
 console.log(`trimmed mean (ms CPU): md-fast ${trimmed(times['md-fast']).toFixed(0)}, marked ${trimmed(times.marked).toFixed(0)}`);
+// Windows reports process CPU in 15.6 ms steps: compare minima and medians over many runs there
+if (process.platform === 'win32') console.log('(win32: CPU times come in ~15.6 ms steps; use --runs 25 or more)');

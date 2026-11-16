@@ -12,6 +12,8 @@ import { setFlagsFromString } from 'node:v8';
 // 2 against TurboFan variants, single-threaded and lazy compilation, semi-space sizes: still best.
 // Round 3: every regex runs often enough to be worth native code, so it is compiled once, natively,
 // instead of first to bytecode and again after its first run (the cold spec cases: ~25% less).
+// Round 4: GC flags (--no-concurrent-marking and kin) must not be set here: changed at run time
+// they can abort V8 with a failed check; --single-threaded(-gc) measured no different.
 for (const flag of ['--no-opt', '--invocation-count-for-maglev=100', '--no-regexp-tier-up']) {
   try {
     setFlagsFromString(flag);

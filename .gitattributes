@@ -1,3 +1,4 @@
 # LF everywhere: the HTML parse.js returns (and the regex sources fuzz.mjs compares with marked's)
 # must not depend on how the checkout was made
 * text=auto eol=lf
+# the licence texts too: LICENSE-marked has to stay byte for byte marked's file

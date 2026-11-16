@@ -81,6 +81,7 @@ function cpuMs(fn) {
   return best;
 }
 
+// warm, in-process numbers (TurboFan allowed): only a direction; the harness times one cold run
 const mine = cpuMs(parse);
 const markedPath = join(kit, 'baselines/vendor/marked/marked.esm.js');
 if (existsSync(markedPath)) {

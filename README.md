@@ -53,6 +53,30 @@ A small step, measured on a busy laptop (Node 24), so take the numbers as rough:
 - Tools: fuzz section 6 (emphasis among defined and undefined link references), `PARSE=<file>`
   for `check.mjs`, and `bench.mjs` uses a `.ts` control and prints the harness's trimmed mean.
 
+## Round 4
+
+Less work per inline step and per list line, output unchanged (practice set and six sets drawn
+from own seeds: 720/720 each; fuzzing 0 differences):
+
+- the inline loop no longer scans each source for `*`, `_`, `~` and `)` up front: a delimiter it
+  stands on is in the source anyway, and the last `)` is looked up once, on the first `[`;
+- pending plain text is kept as a range of the source while nothing in it is decoded, and is
+  escaped only when one of `&<>"'` lies in that range (the next one is tracked);
+- the emphasis mask's three passes run as exec loops that rewrite only the matches that change
+  something, instead of `replace()` with a callback per match;
+- the text run's stop search uses `test()`: where the match starts follows from how it ends;
+- list items walk their continuation lines by index and cut a line out as a string only where a
+  probe, a lazy continuation or the item's content needs it; the content is joined once;
+- regex work that cannot match is skipped: unescaping without a backslash, newline replacement in
+  code spans without a newline, `cleanUrl` by one native search, and emphasis whose run is
+  followed by whitespace is refused before the left-delimiter regex.
+
+Measured on a laptop that other jobs kept 40-60 % busy (Node 24), so rough: one cold pass over the
+practice set in a fresh process, 50 interleaved runs, median wall 339 → 320 ms against round 3
+(about 11 % in a quieter spell); warm passes 9-14 % less. Whole `node main.ts` runs stayed inside
+the noise of Windows' 15.6 ms CPU steps. Tried and dropped: single-threaded GC and compilation
+flags (no change); GC flags such as `--no-concurrent-marking` set at run time can abort V8.
+
 ## Run it
 
 ```sh

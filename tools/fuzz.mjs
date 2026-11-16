@@ -186,5 +186,21 @@ for (let i = 0; i < N / 10; i++) {
   const got = parse(md);
   if (want !== got) fail('references', JSON.stringify(md) + '\n  want ' + JSON.stringify(want) + '\n  got  ' + JSON.stringify(got));
 }
-console.log(`references checked; ${failures} failure(s)`);
+console.log('references checked');
+
+// 7. list items: continuation lines with tabs, odd blanks (nbsp, form feed), lazy lines, setext
+// underlines and nested markers, for the index walk over an item's lines
+const liIndents = ['', ' ', '  ', '   ', '    ', '     ', '\t', ' \t', '  \t', '\t\t', '      ', '\t '];
+const liMarks = ['- ', '* ', '+ ', '1. ', '2) ', '10. ', '-\t', '- [ ] ', '- [x] ', '-', '1.', '> ', '>', ''];
+const liBodies = ['a', 'b c', '*em*', '`c`', '# h', '```', '~~~', '<div>', '---', '***', '===', '--', 'x  ', ' ', '\f', '   ', '', '| a | b |', '|---|', '[r]: /u', 'text\\'];
+for (let i = 0; i < N; i++) {
+  const lines = [];
+  const n = 1 + Math.floor(rand() * 8);
+  for (let k = 0; k < n; k++) lines.push(pick(liIndents) + pick(liMarks) + pick(liBodies));
+  const md = lines.join('\n') + (rand() < 0.3 ? '\n' : '');
+  const want = marked.parse(md);
+  const got = parse(md);
+  if (want !== got) fail('lists', JSON.stringify(md) + '\n  want ' + JSON.stringify(want) + '\n  got  ' + JSON.stringify(got));
+}
+console.log(`list items checked; ${failures} failure(s)`);
 process.exitCode = failures ? 1 : 0;
