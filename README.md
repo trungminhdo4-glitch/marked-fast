@@ -37,6 +37,22 @@ runs: minimum 515 → 405 ms, median 609 → 484 ms), with the output unchanged:
 
 `tools/fuzz.mjs` gained a section that drives emphasis across the mask boundary.
 
+## Round 3
+
+A small step, measured on a busy laptop (Node 24), so take the numbers as rough:
+
+- `main.ts` also sets `--no-regexp-tier-up`: each regex is compiled to native code once, on its
+  first run, instead of to bytecode first and natively again right after. The cold spec cases
+  (they run first and pay the compiles) take about a quarter less; one cold pass over the practice
+  set, 20 interleaved fresh processes: median 288 → 268 ms wall, 328 → 312 ms CPU. For a whole
+  `node main.ts` run (Node's start and type stripping included) the difference stays inside the
+  noise of 25 interleaved runs.
+- Tried and dropped (no measurable change): building the mask's span pass with an exec loop, a
+  pre-screen for the reference pass, decoding entities once per text run instead of per piece,
+  more V8 flags (Sparkplug eagerly, eager feedback, single-threaded GC, regex tier-up ticks).
+- Tools: fuzz section 6 (emphasis among defined and undefined link references), `PARSE=<file>`
+  for `check.mjs`, and `bench.mjs` uses a `.ts` control and prints the harness's trimmed mean.
+
 ## Run it
 
 ```sh
