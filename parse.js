@@ -383,6 +383,11 @@ const R_GT = />/g;
 const R_QUOT = /"/g;
 const R_APOS = /'/g;
 
+/** `s.replace(I_ANY_PUNCT, '$1')`: backslash escapes of punctuation dropped (none without a backslash) */
+function unescapePunct(s) {
+  return s.includes('\\') ? s.replace(I_ANY_PUNCT, '$1') : s;
+}
+
 /** Decodes numeric character references in inline text (and turns stray & into &amp; then). */
 function decodeNumeric(s) {
   if (s.indexOf('&#') === -1 || !R_NUM_REF.test(s)) return s;
@@ -402,15 +407,14 @@ function CH_ALNUM_INIT(c) {
   return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
 }
 
+// the complement of CH_URI_SAFE, for one native search instead of a character loop
+const R_URI_UNSAFE = /[^A-Za-z0-9\-_.!~*'();/?:@&=+$,#%]/;
+for (let c = 0; c < 128; c++) {
+  if (R_URI_UNSAFE.test(String.fromCharCode(c)) !== (CH_URI_SAFE[c] !== 1)) throw new Error('uri tables differ');
+}
+
 function cleanUrl(href) {
-  let i = 0;
-  const n = href.length;
-  while (i < n) {
-    const c = href.charCodeAt(i);
-    if (c >= 128 || CH_URI_SAFE[c] !== 1) break;
-    i++;
-  }
-  if (i === n) return href;
+  if (!R_URI_UNSAFE.test(href)) return href;
   try {
     return encodeURI(href).replace(/%25/g, '%');
   } catch {
@@ -795,6 +799,10 @@ function emailRunStart(s, at, lo) {
 function urlPossible(s) {
   const c = s.charCodeAt(0);
   if (c >= 128 || CH_URL_START[c] !== 1) return false;
+  const l = c | 32;
+  if (l === 104 || l === 102 || l === 109 || l === 120) return true;
+  if (l === 119 && s.startsWith('ww.', 1)) return true;
+  // otherwise only an email: its '@' ends the run of [A-Za-z0-9._+-] that starts here
   let j = 1;
   const n = s.length;
   while (j < n) {
@@ -802,10 +810,7 @@ function urlPossible(s) {
     if (d >= 128 || CH_URL_START[d] !== 1) break;
     j++;
   }
-  if (s.charCodeAt(j) === 64) return true;
-  const l = c | 32;
-  if (l === 104 || l === 102 || l === 109 || l === 120) return true;
-  return l === 119 && s.startsWith('ww.', 1);
+  return s.charCodeAt(j) === 64;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -873,7 +878,7 @@ class Md {
         if ((m = B_FENCES.exec(src))) {
           const raw = m[0];
           src = src.substring(raw.length);
-          const lang = m[2] ? m[2].trim().replace(I_ANY_PUNCT, '$1') : m[2];
+          const lang = m[2] ? unescapePunct(m[2].trim()) : m[2];
           tokens.push({ type: 'code', raw, lang, text: fenceIndent(raw, m[3] || '') });
           continue;
         }
@@ -1260,8 +1265,8 @@ class Md {
     if (!m) return undefined;
     if (!m[2].startsWith('<') && findClosing(m[2], '(', ')') !== -1) return undefined;
     const tag = normalizeLabel(m[1]);
-    const href = m[2] ? m[2].replace(R_HREF_BRACKETS, '$1').replace(I_ANY_PUNCT, '$1') : '';
-    const title = m[3] ? m[3].substring(1, m[3].length - 1).replace(I_ANY_PUNCT, '$1') : m[3];
+    const href = m[2] ? unescapePunct(m[2].replace(R_HREF_BRACKETS, '$1')) : '';
+    const title = m[3] ? unescapePunct(m[3].substring(1, m[3].length - 1)) : m[3];
     return { type: 'def', tag, raw: trimEndChar(m[0], '\n'), href, title };
   }
 
@@ -1446,8 +1451,9 @@ class Md {
         }
         case 96: // `
           if ((m = I_CODE.exec(src))) {
-            let text = m[2].replace(/\n/g, ' ');
-            if (R_NON_SPACE.test(text) && text.startsWith(' ') && text.endsWith(' ')) text = text.substring(1, text.length - 1);
+            let text = m[2];
+            if (text.includes('\n')) text = text.replace(/\n/g, ' ');
+            if (text.startsWith(' ') && text.endsWith(' ') && R_NON_SPACE.test(text)) text = text.substring(1, text.length - 1);
             len = m[0].length;
             html = plain ? text : `<code>${esc(text, true)}</code>`;
           }
@@ -1590,8 +1596,8 @@ class Md {
     return this.emitLink(
       m[1],
       raw,
-      href && href.replace(I_ANY_PUNCT, '$1'),
-      title && title.replace(I_ANY_PUNCT, '$1'),
+      href && unescapePunct(href),
+      title && unescapePunct(title),
       plain,
     );
   }
@@ -1610,7 +1616,7 @@ class Md {
   /** marked's outputLink(): lexes the label, refuses links that contain links. */
   emitLink(label, raw, href, title, plain) {
     title = title || null;
-    const text = label.replace(R_LINK_TEXT_BRACKETS, '$1');
+    const text = label.includes('\\') ? label.replace(R_LINK_TEXT_BRACKETS, '$1') : label;
     const image = raw.charAt(0) === '!';
     const inLink = this.inLink;
     const emitted = this.linkEmitted;
@@ -1681,6 +1687,11 @@ class Md {
   }
 
   emStrong(src, ctx, prevChar, plain) {
+    // I_EM_LEFT captures nothing (a refusal) when its run is followed by whitespace or the end
+    const c0 = src.charCodeAt(0);
+    let r = 1;
+    while (src.charCodeAt(r) === c0) r++;
+    if (r >= src.length || isJsSpace(src.charCodeAt(r))) return undefined;
     let m = I_EM_LEFT.exec(src);
     if (!m || (!m[1] && !m[2] && !m[3] && !m[4])) return undefined;
     const ch = m[0][0];
@@ -1703,9 +1714,9 @@ class Md {
       // the right regex's first alternative is anchored and lazy: it can read far ahead, so it must
       // fail at the first delimiter character, inside the safe part, in both strings
       R_EM_DELIM.lastIndex = from;
-      const d = R_EM_DELIM.exec(whole);
-      if (d !== null) {
-        const k = d.index;
+      if (R_EM_DELIM.test(whole)) {
+        const k = R_EM_DELIM.lastIndex - 1;
+        R_EM_DELIM.lastIndex = 0;
         const pair = ch === '*' ? 95 : 42; // __ for *, ** for _
         if (k + 2 > ctx.safe || (whole.charCodeAt(k) === pair && whole.charCodeAt(k + 1) === pair)) fast = false;
       }
