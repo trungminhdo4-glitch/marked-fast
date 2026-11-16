@@ -10,7 +10,9 @@ import { setFlagsFromString } from 'node:v8';
 // Maglev (tiered up a little earlier than by default) does. Set before parse.js is compiled; each
 // flag on its own, so a V8 that does not know one still takes the others. Measured again in round
 // 2 against TurboFan variants, single-threaded and lazy compilation, semi-space sizes: still best.
-for (const flag of ['--no-opt', '--invocation-count-for-maglev=100']) {
+// Round 3: every regex runs often enough to be worth native code, so it is compiled once, natively,
+// instead of first to bytecode and again after its first run (the cold spec cases: ~25% less).
+for (const flag of ['--no-opt', '--invocation-count-for-maglev=100', '--no-regexp-tier-up']) {
   try {
     setFlagsFromString(flag);
   } catch {

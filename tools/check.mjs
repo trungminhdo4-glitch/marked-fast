@@ -9,7 +9,8 @@
 // <kit dir> is the unpacked competition kit (practice/input/cases.json, practice/reference/expected.json).
 // Prints how many cases match, the first differing cases with the position of the first difference,
 // and the CPU time of rendering every case (best of --runs), next to marked's when the kit's
-// baselines/vendor/marked/marked.esm.js is there.
+// baselines/vendor/marked/marked.esm.js is there. PARSE=<file> checks another copy of parse.js (an
+// experiment kept outside the repository) instead of this one, as tools/fuzz.mjs does.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -29,7 +30,7 @@ const set = si === -1 ? join(kit, 'practice') : resolve(args[si + 1]);
 const cases = JSON.parse(readFileSync(join(set, 'input/cases.json'), 'utf8'));
 const expected = JSON.parse(readFileSync(join(set, 'reference/expected.json'), 'utf8')).cases;
 
-const { parse } = await import(pathToFileURL(resolve(import.meta.dirname, '../parse.js')).href);
+const { parse } = await import(pathToFileURL(resolve(import.meta.dirname, process.env.PARSE ?? '../parse.js')).href);
 
 let ok = 0;
 const bad = [];

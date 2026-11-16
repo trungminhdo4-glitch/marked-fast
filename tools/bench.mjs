@@ -57,8 +57,9 @@ for (let r = 0; r < runs; r++) {
 const median = (a) => [...a].sort((x, y) => x - y)[a.length >> 1];
 const nullRun = (() => {
   const t = [];
-  const empty = join(work, 'empty.mjs');
-  writeFileSync(empty, '');
+  // the control is run as an entry is, a .ts file, so it pays Node's type stripping too
+  const empty = join(work, 'empty.ts');
+  writeFileSync(empty, 'export {};\n');
   for (let r = 0; r < runs; r++) {
     const res = spawnSync(process.execPath, ['--import', 'file:///' + hook.replace(/\\/g, '/'), empty], { encoding: 'utf8' });
     t.push(Number(/CPU (\d+)/.exec(res.stderr)[1]) / 1000);
@@ -71,3 +72,11 @@ const a = median(times['md-fast']);
 const b = median(times.marked);
 console.log(`median of ${runs} runs (ms CPU): md-fast ${a.toFixed(0)}, marked ${b.toFixed(0)}, empty node ${nullRun.toFixed(0)}`);
 console.log(`net of empty node: md-fast ${(a - nullRun).toFixed(0)}, marked ${(b - nullRun).toFixed(0)}, speedup ${((b - nullRun) / (a - nullRun)).toFixed(2)}x`);
+// the harness's statistic: the mean with the 2 fastest and the 2 slowest runs dropped
+const trimmed = (x) => {
+  const s = [...x].sort((p, q) => p - q);
+  const k = s.length >= 5 ? 2 : 0;
+  const kept = s.slice(k, s.length - k);
+  return kept.reduce((p, q) => p + q, 0) / kept.length;
+};
+console.log(`trimmed mean (ms CPU): md-fast ${trimmed(times['md-fast']).toFixed(0)}, marked ${trimmed(times.marked).toFixed(0)}`);

@@ -5,7 +5,8 @@
 // 1. every regex parse.js composes has exactly marked's source and flags;
 // 2. the hand-written inline text scanner matches marked's gfm text regex on random strings;
 // 3. parse() equals marked.parse() on random markdown built from risky fragments;
-// 4. the same for line soup, and 5. for emphasis around the spans the emphasis mask rewrites.
+// 4. the same for line soup, 5. for emphasis around the spans the emphasis mask rewrites, and
+// 6. for emphasis among link references, defined and undefined.
 // Deterministic for a given seed; prints the first counterexamples it finds. PARSE=<file> checks
 // another copy of parse.js (to see that a known-bad version fails).
 
@@ -163,5 +164,27 @@ for (const md of emDocs) {
   const got = parse(md);
   if (want !== got) fail('emphasis', JSON.stringify(md) + '\n  want ' + JSON.stringify(want) + '\n  got  ' + JSON.stringify(got));
 }
-console.log(`emphasis boundary checked; ${failures} failure(s)`);
+console.log('emphasis boundary checked');
+
+// 6. references: emphasis across full, collapsed and shortcut references, defined or not, with
+// labels that only match after normalization (case, inner whitespace, escapes), so the mask's
+// reference pass swaps some brackets and keeps others
+const refLabels = ['foo', 'Foo', 'FOO', ' foo ', 'foo\n bar', 'foo  bar', 'Foo Bar', 'ß', 'SS', 'f\\]o', 'f\\[o', '1', 'x'];
+const refBits = ['*', '**', '_', '~~', ' ', 'a', '`*`', '\\*', '!', '[', ']', '](u)', '[]', 'é'];
+for (let i = 0; i < N / 10; i++) {
+  let md = '';
+  const w = 3 + Math.floor(rand() * 12);
+  for (let j = 0; j < w; j++) {
+    const r = rand();
+    if (r < 0.25) md += '[' + pick(refLabels) + ']';
+    else if (r < 0.35) md += '[' + pick(refBits) + pick(refLabels) + '][' + pick(refLabels) + ']';
+    else md += pick(refBits);
+  }
+  const defs = Math.floor(rand() * 3);
+  for (let d = 0; d < defs; d++) md += '\n\n[' + pick(refLabels).trim() + ']: /u' + d;
+  const want = marked.parse(md);
+  const got = parse(md);
+  if (want !== got) fail('references', JSON.stringify(md) + '\n  want ' + JSON.stringify(want) + '\n  got  ' + JSON.stringify(got));
+}
+console.log(`references checked; ${failures} failure(s)`);
 process.exitCode = failures ? 1 : 0;

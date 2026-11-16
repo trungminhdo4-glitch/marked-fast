@@ -1204,11 +1204,10 @@ class Md {
   inlineTokens(src, plain) {
     const parenBefore = this.linkParenPossible;
     this.linkParenPossible = parenBefore && src.includes(')');
-    try {
-      return this.inlineLoop(src, plain);
-    } finally {
-      this.linkParenPossible = parenBefore;
-    }
+    // no try/finally: nothing inside catches, so a throw ends the whole parse() and its Md with it
+    const html = this.inlineLoop(src, plain);
+    this.linkParenPossible = parenBefore;
+    return html;
   }
 
   inlineLoop(src, plain) {
