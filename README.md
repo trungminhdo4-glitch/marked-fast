@@ -89,6 +89,10 @@ sets: 720/720 each; fuzzing 0 differences):
 - `package.json` carries a description and is marked private (nothing here is published to npm);
 - notes in `main.ts`, `NOTICE`, `.gitattributes`, `.gitignore` and the licence headers.
 
+Tried and dropped: taking the hard-break alternative (`(?<=[^ ]) {2,}\n`) out of the text run's
+stop regex and finding `"  \n"` by a tracked `indexOf` instead. Output identical, but no change
+outside the noise (warm best of 15: 203 ms both; cold fresh-process medians within ±2 %).
+
 ## Run it
 
 ```sh
