@@ -37,7 +37,10 @@ function once(main) {
     encoding: 'utf8',
   });
   if (r.status !== 0) throw new Error(main + ' failed: ' + r.stderr);
-  const cpu = Number(/CPU (\d+)/.exec(r.stderr)[1]) / 1000;
+  // a run that exits without the hook's line (killed, or a hook that did not load) says so plainly
+  const m = /CPU (\d+)/.exec(r.stderr);
+  if (!m) throw new Error(main + ' printed no CPU line: ' + r.stderr);
+  const cpu = Number(m[1]) / 1000;
   const html = JSON.parse(readFileSync(join(out, 'html.json'), 'utf8'));
   const same = html.length === expected.length && html.every((h, i) => h === expected[i]);
   return { cpu, same };

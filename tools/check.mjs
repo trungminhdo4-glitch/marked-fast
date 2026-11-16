@@ -49,7 +49,8 @@ for (let i = 0; i < cases.length; i++) {
     bad.push({ id: cases[i].id, at, got: got.slice(Math.max(0, at - 40), at + 60), want: want.slice(Math.max(0, at - 40), at + 60) });
   }
 }
-console.log(`identical: ${ok}/${cases.length}`);
+// the harness runs Node 22: the version is printed so that a result from another Node is seen as such
+console.log(`identical: ${ok}/${cases.length} (node ${process.versions.node}, set ${set})`);
 for (const b of bad.slice(0, show)) {
   console.log(`--- ${b.id} differs at ${b.at}`);
   console.log('  got : ' + JSON.stringify(b.got));

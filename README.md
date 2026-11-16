@@ -77,6 +77,18 @@ practice set in a fresh process, 50 interleaved runs, median wall 339 → 320 ms
 the noise of Windows' 15.6 ms CPU steps. Tried and dropped: single-threaded GC and compilation
 flags (no change); GC flags such as `--no-concurrent-marking` set at run time can abort V8.
 
+## Round 5
+
+Housekeeping before the resubmission, `parse.js`'s output unchanged (practice set and the six own
+sets: 720/720 each; fuzzing 0 differences):
+
+- `tools/check.mjs` prints the Node version and the set it checked next to the match count, since
+  the harness runs Node 22 and local numbers here come from Node 24;
+- `tools/bench.mjs` fails with a clear message when a run prints no CPU line, instead of a
+  `TypeError` on the missing match;
+- `package.json` carries a description and is marked private (nothing here is published to npm);
+- notes in `main.ts`, `NOTICE`, `.gitattributes`, `.gitignore` and the licence headers.
+
 ## Run it
 
 ```sh

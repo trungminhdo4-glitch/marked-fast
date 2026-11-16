@@ -8,3 +8,5 @@ out/
 # generated test sets (the kit's generator, own seeds) and heap profiles
 sets/
 *.heapprofile
+# `npm pack` output: the entry is the repository at one commit, never a tarball
+*.tgz

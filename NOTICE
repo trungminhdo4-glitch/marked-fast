@@ -14,6 +14,7 @@ in LICENSE-marked.
 
 No code of marked is executed or bundled at run time: marked is used only by the repository's
 test tools, loaded from a separately downloaded copy.
+That copy is the one the competition kit vendors (baselines/vendor/marked/marked.esm.js).
 
 Where parse.js replaces one of marked's regular expressions or replace() calls by a scanner or an
 index walk, the replaced expression is named in a comment next to it, so each can be checked

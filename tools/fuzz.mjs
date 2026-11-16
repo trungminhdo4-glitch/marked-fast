@@ -9,6 +9,7 @@
 // 6. for emphasis among link references, defined and undefined.
 // Deterministic for a given seed; prints the first counterexamples it finds. PARSE=<file> checks
 // another copy of parse.js (to see that a known-bad version fails).
+// Exit code 1 when any section found a difference, so `npm run fuzz` can gate a commit.
 
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';

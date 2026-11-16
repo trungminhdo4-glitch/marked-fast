@@ -30,6 +30,8 @@ const inputDir: string = process.env.MD_FAST_INPUT ?? process.env.MAKEFUN_INPUT_
 const outputDir: string = process.env.MD_FAST_OUTPUT ?? process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
 const cases: Case[] = JSON.parse(readFileSync(inputDir + '/cases.json', 'utf8'));
+// Each case is rendered on its own (parse() keeps no state between calls), and the array is sized
+// up front so that the loop below only stores; round 5 left this driver as it was.
 const html: string[] = new Array(cases.length);
 for (let i = 0; i < cases.length; i++) html[i] = parse(cases[i].markdown);
 writeFileSync(outputDir + '/html.json', JSON.stringify(html));

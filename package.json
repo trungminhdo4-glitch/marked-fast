@@ -1,4 +1,6 @@
 {
+  "description": "Dependency-free drop-in for marked.parse() (marked 18.1.3, GFM), same HTML, faster cold runs",
+  "private": true,
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -7,6 +9,6 @@
     "check": "node tools/check.mjs ../kit-md/markdown-render-speed-02-kit",
     "fuzz": "node tools/fuzz.mjs ../kit-md/markdown-render-speed-02-kit --n 40000",
     "bench": "node tools/bench.mjs ../kit-md/markdown-render-speed-02-kit --runs 15",
-    "fuzz-alt":"node tools/fuzz.mjs ../kit-md/markdown-render-speed-02-kit --n 40000 --seed 7"
+    "fuzz-alt": "node tools/fuzz.mjs ../kit-md/markdown-render-speed-02-kit --n 40000 --seed 7"
   }
 }
