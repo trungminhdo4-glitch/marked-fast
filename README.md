@@ -20,6 +20,23 @@ How it gets there (see the header of `parse.js`):
 - list items walk lines by index; paragraphs, setext headings and tables are pre-screened;
 - `main.ts` turns TurboFan off for the single cold pass (Maglev only).
 
+## Round 2
+
+About a fifth less CPU for a whole `node main.ts` run on the practice set (local, 31 interleaved
+runs: minimum 515 → 405 ms, median 609 → 484 ms), with the output unchanged:
+
+- `parse()` flattens its result before returning it, so the concatenation trees of 720 cases do
+  not age into the old generation and get flattened by the final `JSON.stringify`;
+- escaping is done by native searches and replaces (marked's own regex for a loose `&`);
+- below the first `[`, `` ` ``, `\` or `<` the emphasis mask equals the source, so emphasis and
+  strikethrough look for their closer there first and build the mask only when the search leaves
+  that part (the anchored, lazy first alternative of the closer regexes is guarded on its own);
+- the mask's escape pass is skipped when it cannot change anything; fill strings are cached;
+- smaller things: the setext underline search stops at the next blank line, table rows without a
+  backslash split on `|` directly, ASCII tables answer the delimiter punctuation checks.
+
+`tools/fuzz.mjs` gained a section that drives emphasis across the mask boundary.
+
 ## Run it
 
 ```sh
@@ -28,6 +45,7 @@ MAKEFUN_INPUT_DIR=in MAKEFUN_OUTPUT_DIR=out node main.ts
 node tools/check.mjs <kit dir>                 # practice set: identical cases + CPU time vs marked
 node tools/fuzz.mjs <kit dir> --n 50000        # differential fuzzing against marked
 node tools/bench.mjs <kit dir> --runs 15       # fresh-process CPU time, md-fast vs marked
+npm run check / npm run fuzz / npm run bench   # the same with the kit next to this repo
 ```
 
 The tools load marked from the competition kit; nothing of marked is shipped or run by `main.ts`.
