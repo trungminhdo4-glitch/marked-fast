@@ -1,3 +1,4 @@
+# local runs and profiles only: the practice set, outputs and CPU profiles stay out of the repo
 node_modules/
 *.cpuprofile
 profiles/

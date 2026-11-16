@@ -1,7 +1,8 @@
 // Compares parse.js with the practice reference case by case and times it.
 //
-//   node tools/check.mjs <kit dir> [--runs N] [--show N] [--set <dir>]
+//   node tools/check.mjs <kit dir> [--runs N] [--show N] [--set <dir>] [--case <id>]
 //
+// --case prints one case in full: its markdown, what parse() returns and the reference.
 // --set takes another drawn instance (<dir>/input/cases.json, <dir>/reference/expected.json), such as
 // one the kit's generator drew from a seed of your own, in place of the practice set.
 //
@@ -54,6 +55,19 @@ for (const b of bad.slice(0, show)) {
   console.log('  want: ' + JSON.stringify(b.want));
 }
 if (bad.length > show) console.log(`... and ${bad.length - show} more: ${bad.slice(show).map((b) => b.id).join(' ')}`);
+
+const ci = args.indexOf('--case');
+if (ci !== -1) {
+  const i = cases.findIndex((c) => c.id === args[ci + 1]);
+  if (i === -1) console.log(`no case ${args[ci + 1]}`);
+  else {
+    const got = parse(cases[i].markdown);
+    console.log(`=== ${cases[i].id} (${got === expected[i].html ? 'identical' : 'differs'})`);
+    console.log('markdown: ' + JSON.stringify(cases[i].markdown));
+    console.log('got     : ' + JSON.stringify(got));
+    console.log('want    : ' + JSON.stringify(expected[i].html));
+  }
+}
 
 function cpuMs(fn) {
   let best = Infinity;

@@ -3,7 +3,8 @@
 //
 //   node tools/bench.mjs <kit dir> [--runs N]
 //
-// Runs this repository's main.ts and the kit's baseline (marked) alternately on the practice input,
+// Runs this repository's main.ts and the kit's baseline (marked) alternately (in turns, each going
+// first every other run) on the practice input,
 // checks that both outputs equal the reference, and prints the median CPU time of each.
 
 import { spawnSync } from 'node:child_process';
@@ -44,7 +45,10 @@ function once(main) {
 
 const times = { 'md-fast': [], marked: [] };
 for (let r = 0; r < runs; r++) {
-  for (const [name, main] of Object.entries(entries)) {
+  // alternate who goes first, so that a machine getting busier or quieter hits both alike
+  const order = Object.entries(entries);
+  if (r % 2) order.reverse();
+  for (const [name, main] of order) {
     const { cpu, same } = once(main);
     if (!same) throw new Error(name + ' output differs from the reference');
     times[name].push(cpu);

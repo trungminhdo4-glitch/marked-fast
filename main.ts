@@ -8,7 +8,8 @@ import { setFlagsFromString } from 'node:v8';
 
 // One run renders the set once, cold: TurboFan's compile time never pays for itself here, while
 // Maglev (tiered up a little earlier than by default) does. Set before parse.js is compiled; each
-// flag on its own, so a V8 that does not know one still takes the others.
+// flag on its own, so a V8 that does not know one still takes the others. Measured again in round
+// 2 against TurboFan variants, single-threaded and lazy compilation, semi-space sizes: still best.
 for (const flag of ['--no-opt', '--invocation-count-for-maglev=100']) {
   try {
     setFlagsFromString(flag);

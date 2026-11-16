@@ -1,3 +1,8 @@
 {
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "check": "node tools/check.mjs ../kit-md/markdown-render-speed-02-kit",
+    "fuzz": "node tools/fuzz.mjs ../kit-md/markdown-render-speed-02-kit --n 40000",
+    "bench": "node tools/bench.mjs ../kit-md/markdown-render-speed-02-kit --runs 15"
+  }
 }

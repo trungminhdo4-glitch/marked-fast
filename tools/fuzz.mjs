@@ -4,8 +4,10 @@
 //
 // 1. every regex parse.js composes has exactly marked's source and flags;
 // 2. the hand-written inline text scanner matches marked's gfm text regex on random strings;
-// 3. parse() equals marked.parse() on random markdown built from risky fragments.
-// Deterministic for a given seed; prints the first counterexamples it finds.
+// 3. parse() equals marked.parse() on random markdown built from risky fragments;
+// 4. the same for line soup, and 5. for emphasis around the spans the emphasis mask rewrites.
+// Deterministic for a given seed; prints the first counterexamples it finds. PARSE=<file> checks
+// another copy of parse.js (to see that a known-bad version fails).
 
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -30,7 +32,7 @@ const rand = () => {
 const pick = (a) => a[Math.floor(rand() * a.length)];
 
 const { marked } = await import(pathToFileURL(join(kit, 'baselines/vendor/marked/marked.esm.js')).href);
-const { parse, internals } = await import(pathToFileURL(resolve(import.meta.dirname, '../parse.js')).href);
+const { parse, internals } = await import(pathToFileURL(resolve(import.meta.dirname, process.env.PARSE ?? '../parse.js')).href);
 
 let failures = 0;
 const fail = (what, detail) => {
@@ -141,5 +143,25 @@ for (let i = 0; i < N / 10; i++) {
   const got = parse(md);
   if (want !== got) fail('lines', JSON.stringify(md) + '\n  want ' + JSON.stringify(want) + '\n  got  ' + JSON.stringify(got));
 }
-console.log(`line soup checked; ${failures} failure(s)`);
+console.log('line soup checked');
+
+// 5. emphasis around the first span the mask rewrites (code, links, escapes, html): the closer
+// search runs on the source up to there, then falls back to the mask. The fixed cases are ones
+// where the anchored first alternative of the right regexes only matches in the mask.
+const emFixed = ['*__ x* y `a_b` __', '_** x_ y `a*b` **', 'a *__ b* c `d_e` __ f', '**__ x** y `a_b` __', '~~a~~ `b` ~~c~~'];
+const emBits = ['*', '**', '_', '__', '~', '~~', ' ', 'a', 'b', '.', '`x_y`', '`*`', '[t*](u)', '[r]', '\\*', '\\_', '<i>', '!', 'é'];
+const emDocs = [...emFixed];
+for (let i = 0; i < N / 10; i++) {
+  let md = '';
+  const w = 2 + Math.floor(rand() * 14);
+  for (let j = 0; j < w; j++) md += pick(emBits);
+  if (rand() < 0.2) md += '\n\n[r]: /u';
+  emDocs.push(md);
+}
+for (const md of emDocs) {
+  const want = marked.parse(md);
+  const got = parse(md);
+  if (want !== got) fail('emphasis', JSON.stringify(md) + '\n  want ' + JSON.stringify(want) + '\n  got  ' + JSON.stringify(got));
+}
+console.log(`emphasis boundary checked; ${failures} failure(s)`);
 process.exitCode = failures ? 1 : 0;
