@@ -266,6 +266,16 @@ const R_NUM_REF_OR_AMP = /&#(?:(\d{1,7})|[Xx]([A-Fa-f0-9]{1,6}));|&(?!(#\d{1,7}|
 const R_CRLF = /\r\n|\r/g;
 const R_WS_RUN = /\s+/g;
 const R_LIST_SETEXT_LINE = /^ {0,3}(?:=+|-+) *$/;
+// The emphasis mask hides a link, code span or html tag as '[' + 'a' * (length - 2) + ']'; the
+// fill strings are made once per length.
+const FILLS = [];
+function blockFill(all) {
+  const n = all.length;
+  let f = FILLS[n];
+  if (f === undefined) f = FILLS[n] = '[' + 'a'.repeat(n - 2) + ']';
+  return f;
+}
+
 // emphasis fast path: where a span of the mask can start, the delimiters the right regexes look for,
 // and the answer of a closer search that left the part where the source equals the mask
 const R_MASK_START = /[\[`\\<]/;
@@ -1164,14 +1174,15 @@ class Md {
       };
       out = out.replace(I_REFLINK_SEARCH, swap);
     }
-    if (out.includes('`') || out.includes('\\')) {
+    // This pass only rewrites escapes and backticks inside code spans. With single-tick fences a
+    // code span holds no backtick (the lazy body would have ended at a lone one), so without a
+    // backslash and without '``' it changes nothing.
+    if (out.includes('\\') || out.includes('``')) {
       out = out.replace(I_ANY_PUNCT_OUTSIDE_CODE, (all, ticks, esc) =>
         esc ? '+'.repeat(all.length) : ticks ? ticks + all.slice(ticks.length, -ticks.length).replace(/`/g, '+') + ticks : all,
       );
     }
-    if (out.includes('](') || out.includes('`') || out.includes('<')) {
-      out = out.replace(I_BLOCK_SKIP, (all) => '[' + 'a'.repeat(all.length - 2) + ']');
-    }
+    if (out.includes('](') || out.includes('`') || out.includes('<')) out = out.replace(I_BLOCK_SKIP, blockFill);
     return out;
   }
 
@@ -1762,7 +1773,12 @@ export function parse(markdown) {
     md.inRawBlock = false;
     q[i].html = md.inlineTokens(q[i].src, false);
   }
-  return md.render(tokens);
+  const html = md.render(tokens);
+  // The result is a deep tree of concatenations. Flattening it now (charCodeAt in the middle does
+  // that), while its parts are young and in cache, is much cheaper than letting the trees of every
+  // case age into the old generation and be flattened by the caller's JSON.stringify at the end.
+  html.charCodeAt(html.length >> 1);
+  return html;
 }
 
 // exported for the repository's own regex and scanner checks (tools/)
