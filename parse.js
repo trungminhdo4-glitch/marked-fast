@@ -266,6 +266,11 @@ const R_NUM_REF_OR_AMP = /&#(?:(\d{1,7})|[Xx]([A-Fa-f0-9]{1,6}));|&(?!(#\d{1,7}|
 const R_CRLF = /\r\n|\r/g;
 const R_WS_RUN = /\s+/g;
 const R_LIST_SETEXT_LINE = /^ {0,3}(?:=+|-+) *$/;
+// emphasis fast path: where a span of the mask can start, the delimiters the right regexes look for,
+// and the answer of a closer search that left the part where the source equals the mask
+const R_MASK_START = /[\[`\\<]/;
+const R_EM_DELIM = /[_*]/g;
+const UNSURE = { unsure: true };
 
 // Line-start probes used by list items, one per indentation 0..3 (marked builds them on demand).
 const listProbes = [];
@@ -295,54 +300,31 @@ const ITEM_PAREN = itemRegex('\\d{1,9}\\)');
 // ---------------------------------------------------------------------------------------------
 // String helpers
 
-
 /**
  * marked's escape(): `strict` escapes every &, otherwise an & that starts an entity or a numeric
- * reference (`&(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);`) is kept. One pass, slices between hits.
+ * reference (`&(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);`) is kept. Without TurboFan a JS character
+ * loop is slow, so the work is left to native searches and replaces.
  */
+const R_ESC_ANY = /[&<>"']/;
 function esc(s, strict) {
-  const n = s.length;
-  let out = '';
-  let last = 0;
-  for (let i = 0; i < n; i++) {
-    const c = s.charCodeAt(i);
-    if (c > 62 || CH_ESC[c] === 0) continue;
-    let rep;
-    if (c === 38) {
-      if (!strict && entityAt(s, i + 1)) continue;
-      rep = '&amp;';
-    } else rep = c === 60 ? '&lt;' : c === 62 ? '&gt;' : c === 34 ? '&quot;' : '&#39;';
-    out += last === i ? rep : s.slice(last, i) + rep;
-    last = i + 1;
-  }
-  return last === 0 ? s : last === n ? out : out + s.slice(last);
+  const first = s.search(R_ESC_ANY);
+  if (first === -1) return s;
+  // one native replace per character that occurs (& first): flat results, no JS loop, no callback
+  let out = s;
+  if (out.indexOf('&', first) !== -1) out = out.replace(strict ? R_AMP : R_AMP_LOOSE, '&amp;');
+  if (out.indexOf('<', first) !== -1) out = out.replace(R_LT, '&lt;');
+  if (out.indexOf('>', first) !== -1) out = out.replace(R_GT, '&gt;');
+  if (out.indexOf('"', first) !== -1) out = out.replace(R_QUOT, '&quot;');
+  if (out.indexOf("'", first) !== -1) out = out.replace(R_APOS, '&#39;');
+  return out;
 }
-const CH_ESC = new Uint8Array(63);
-for (const ch of '&<>"\'') CH_ESC[ch.charCodeAt(0)] = 1;
-
-const isWordChar = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
-const isDigit = (c) => c >= 48 && c <= 57;
-const isHex = (c) => isDigit(c) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102);
-
-/** `(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);` at i */
-function entityAt(s, i) {
-  let j = i;
-  if (s.charCodeAt(j) === 35) {
-    j++;
-    const x = s.charCodeAt(j);
-    if (x === 88 || x === 120) {
-      const st = ++j;
-      while (isHex(s.charCodeAt(j))) j++;
-      if (j - st >= 1 && j - st <= 6 && s.charCodeAt(j) === 59) return true;
-      j = i + 1;
-    }
-    const st = j;
-    while (isDigit(s.charCodeAt(j))) j++;
-    return j - st >= 1 && j - st <= 7 && s.charCodeAt(j) === 59;
-  }
-  while (isWordChar(s.charCodeAt(j))) j++;
-  return j > i && s.charCodeAt(j) === 59;
-}
+// marked's own: in loose mode an & that starts an entity or a numeric reference stays
+const R_AMP_LOOSE = /&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g;
+const R_AMP = /&/g;
+const R_LT = /</g;
+const R_GT = />/g;
+const R_QUOT = /"/g;
+const R_APOS = /'/g;
 
 /** Decodes numeric character references in inline text (and turns stray & into &amp; then). */
 function decodeNumeric(s) {
@@ -503,6 +485,32 @@ function codePointBefore(s, l) {
   return s[l - 1];
 }
 
+// ASCII answers of I_PUNCTUATION and R_ALNUM_UNICODE, taken from the regexes themselves; the
+// emphasis checks ask them about one character at a time, mostly ASCII.
+const CH_PUNCT = new Uint8Array(128);
+const CH_LN = new Uint8Array(128);
+for (let c = 0; c < 128; c++) {
+  const ch = String.fromCharCode(c);
+  CH_PUNCT[c] = I_PUNCTUATION.test(ch) ? 1 : 0;
+  CH_LN[c] = R_ALNUM_UNICODE.test(ch) ? 1 : 0;
+}
+
+/** `!!I_PUNCTUATION.exec(s)`: the first code point is whitespace, punctuation or a symbol, not * or _ */
+function isPunct(s) {
+  if (s.length === 0) return false;
+  const c = s.charCodeAt(0);
+  return c < 128 ? CH_PUNCT[c] === 1 : I_PUNCTUATION.exec(s) !== null;
+}
+
+/** `!!s.match(R_ALNUM_UNICODE)` */
+function hasAlnum(s) {
+  if (s.length === 1) {
+    const c = s.charCodeAt(0);
+    if (c < 128) return CH_LN[c] === 1;
+  }
+  return R_ALNUM_UNICODE.test(s);
+}
+
 function firstLine(s) {
   const i = s.indexOf('\n');
   return i === -1 ? s : s.slice(0, i);
@@ -535,20 +543,26 @@ function endsWithBlankLine(s) {
 }
 
 function splitCells(row, count) {
-  const marked = row.replace(/\|/g, (m, at, str) => {
-    let escaped = false;
-    let p = at;
-    while (--p >= 0 && str[p] === '\\') escaped = !escaped;
-    return escaped ? '|' : ' |';
-  });
-  const cells = marked.split(/ \|/);
+  const slash = row.includes('\\');
+  // without a backslash every pipe becomes ' |' and the split takes each of them: a plain split
+  const cells = slash
+    ? row
+        .replace(/\|/g, (m, at, str) => {
+          let escaped = false;
+          let p = at;
+          while (--p >= 0 && str[p] === '\\') escaped = !escaped;
+          return escaped ? '|' : ' |';
+        })
+        .split(/ \|/)
+    : row.split('|');
   if (!cells[0].trim()) cells.shift();
   if (cells.length > 0 && !cells[cells.length - 1]?.trim()) cells.pop();
   if (count) {
     if (cells.length > count) cells.splice(count);
     else while (cells.length < count) cells.push('');
   }
-  for (let i = 0; i < cells.length; i++) cells[i] = cells[i].trim().replace(/\\\|/g, '|');
+  if (slash) for (let i = 0; i < cells.length; i++) cells[i] = cells[i].trim().replace(/\\\|/g, '|');
+  else for (let i = 0; i < cells.length; i++) cells[i] = cells[i].trim();
   return cells;
 }
 
@@ -838,20 +852,21 @@ class Md {
 
       // an lheading needs an underline before the first blank line
       const off = whole.length - src.length;
+      if (blankAt !== Infinity && blankAt < off) {
+        BLANK_LINE_BREAK.lastIndex = off;
+        const b = BLANK_LINE_BREAK.exec(whole);
+        blankAt = b ? b.index : Infinity;
+      }
       if (underlineAt !== Infinity && underlineAt < off) {
+        // Only an underline before the blank line counts, so the search stops there: one that starts
+        // before blankAt ends at the latest with its '\n', and the slice ends right after that '\n',
+        // where `$` cannot match an underline. underlineAt = blankAt means "none before blankAt".
+        const hay = blankAt === Infinity ? whole : whole.slice(0, blankAt + 1);
         SETEXT_UNDERLINE.lastIndex = off;
-        const u = SETEXT_UNDERLINE.exec(whole);
-        underlineAt = u ? u.index : Infinity;
+        const u = SETEXT_UNDERLINE.exec(hay);
+        underlineAt = u ? u.index : blankAt;
       }
-      let setext = underlineAt !== Infinity;
-      if (setext) {
-        if (blankAt !== Infinity && blankAt < off) {
-          BLANK_LINE_BREAK.lastIndex = off;
-          const b = BLANK_LINE_BREAK.exec(whole);
-          blankAt = b ? b.index : Infinity;
-        }
-        setext = underlineAt < blankAt;
-      }
+      const setext = underlineAt < blankAt;
 
       if (setext && (m = B_LHEADING.exec(src))) {
         const raw = trimEndChar(m[0], '\n');
@@ -1188,7 +1203,7 @@ class Md {
   inlineLoop(src, plain) {
     const whole = src;
     const delims = src.includes('*') || src.includes('_') || src.includes('~');
-    const ctx = { whole, masked: null, closers: null, at: 0 };
+    const ctx = { whole, masked: null, closers: null, at: 0, safe: -2 };
     let out = '';
     let pend = '';
     let pendOn = false;
@@ -1279,8 +1294,8 @@ class Md {
             html = plain ? text : `<code>${esc(text, true)}</code>`;
           }
           break;
-        case 32: // space
-          if ((m = I_BR.exec(src))) {
+        case 32: // space (a hard break needs at least two)
+          if (src.charCodeAt(1) === 32 && (m = I_BR.exec(src))) {
             len = m[0].length;
             html = plain ? '' : '<br>';
           }
@@ -1496,34 +1511,62 @@ class Md {
     if (here === 0 || whole.charCodeAt(here - 1) !== ch.charCodeAt(0)) {
       // The mask never creates delimiter characters, so no run of `ch` ends right before here and
       // marked's early refusals only depend on the previous character: decide them without the mask.
-      if (m[4] && prev.match(R_ALNUM_UNICODE)) return undefined;
-      if ((m[1] || m[3]) && prev && !I_PUNCTUATION.exec(prev)) return undefined;
+      if (m[4] && hasAlnum(prev)) return undefined;
+      if ((m[1] || m[3]) && prev && !isPunct(prev)) return undefined;
     }
-    const closers = this.closersOf(ctx);
-    let mask = ctx.masked;
+    const lLen = [...m[0]].length - 1;
+    const from = here + lLen;
+    // Fast path: below ctx.safe the mask equals the source, so it is not built while the left side
+    // and the closer search stay there (see emScan); the left side only reads before `here`.
+    let fast = ctx.closers === null && here < this.safeOf(ctx);
+    if (fast) {
+      // the right regex's first alternative is anchored and lazy: it can read far ahead, so it must
+      // fail at the first delimiter character, inside the safe part, in both strings
+      R_EM_DELIM.lastIndex = from;
+      const d = R_EM_DELIM.exec(whole);
+      if (d !== null) {
+        const k = d.index;
+        const pair = ch === '*' ? 95 : 42; // __ for *, ** for _
+        if (k + 2 > ctx.safe || (whole.charCodeAt(k) === pair && whole.charCodeAt(k + 1) === pair)) fast = false;
+      }
+    }
+    const mask = fast ? whole : (this.closersOf(ctx), ctx.masked);
     let l = here;
     while (l > 0 && mask[l - 1] === ch) l--;
     const before = codePointBefore(mask, l);
-    const beforeIsPunct = before === '*' || before === '_' || !!I_PUNCTUATION.exec(before);
+    const beforeIsPunct = before === '*' || before === '_' || isPunct(before);
     if (l < here) prev = before;
-    const prevPunct = l < here ? beforeIsPunct : !!I_PUNCTUATION.exec(prev);
-    if (m[4] && prev.match(R_ALNUM_UNICODE)) return undefined;
+    const prevPunct = l < here ? beforeIsPunct : isPunct(prev);
+    if (m[4] && hasAlnum(prev)) return undefined;
     const leftPunct = m[1] || m[3] || '';
     if (leftPunct && prev && !prevPunct) return undefined;
-    const lLen = [...m[0]].length - 1;
-    let need = lLen;
-    let skipped = 0;
     const runBefore = here - l + lLen;
     const checkMod3 = !!before.trim() && (!!leftPunct || (ch === '*' && !beforeIsPunct));
     if (ch !== '*' && ch !== '_') return undefined;
     const right = ch === '*' ? I_EM_RIGHT_AST : I_EM_RIGHT_UND;
-    const lastCloser = closers[ch];
-    const from = here + lLen;
+    if (fast) {
+      const r = this.emScan(src, whole.slice(from), from, Infinity, ctx.safe, right, lLen, runBefore, checkMod3, sameAsPrev, plain);
+      if (r !== UNSURE) return r;
+      this.closersOf(ctx);
+    }
+    const lastCloser = ctx.closers[ch];
     if (lastCloser < from) return undefined;
-    mask = mask.slice(-1 * src.length + lLen);
-    const limit = lastCloser - from;
+    return this.emScan(src, ctx.masked.slice(from), from, lastCloser - from, Infinity, right, lLen, runBefore, checkMod3, sameAsPrev, plain);
+  }
+
+  /**
+   * marked's closer search of emStrong over `tail` (the mask after the left delimiter). With a finite
+   * `safe` the tail is the source, exact only below `safe`: a match whose text or lookahead reaches
+   * past it, or a search that runs off the end, answers UNSURE.
+   */
+  emScan(src, tail, from, limit, safe, right, lLen, runBefore, checkMod3, sameAsPrev, plain) {
+    let need = lLen;
+    let skipped = 0;
+    let m;
     right.lastIndex = 0;
-    while ((m = right.exec(mask)) !== null && !(m.index > limit)) {
+    while ((m = right.exec(tail)) !== null) {
+      if (from + m.index + m[0].length + 2 > safe) return UNSURE;
+      if (m.index > limit) break;
       const run = m[1] || m[2] || m[3] || m[4] || m[5] || m[6];
       if (!run) continue;
       let rLen = [...run].length;
@@ -1549,24 +1592,48 @@ class Md {
       const inner = this.inlineTokens(raw.slice(2, -2), plain);
       return { len: raw.length, html: plain ? inner : `<strong>${inner}</strong>` };
     }
-    return undefined;
+    return m === null && safe !== Infinity ? UNSURE : undefined;
+  }
+
+  /**
+   * Below ctx.safe the emphasis mask equals the source: every span the mask rewrites starts at one
+   * of [ ` \ < or at the ! right before a [. Infinity: the mask is the source itself.
+   */
+  safeOf(ctx) {
+    if (ctx.safe === -2) {
+      const k = ctx.whole.search(R_MASK_START);
+      ctx.safe = k === -1 ? Infinity : k - 1;
+    }
+    return ctx.safe;
   }
 
   del(src, ctx, prevChar, plain) {
     let m = I_DEL_LEFT.exec(src);
     if (!m) return undefined;
     const leftPunct = m[1] || '';
-    if (leftPunct && prevChar && !I_PUNCTUATION.exec(prevChar)) return undefined;
+    if (leftPunct && prevChar && !isPunct(prevChar)) return undefined;
     const lLen = [...m[0]].length - 1;
-    let need = lLen;
+    const here = ctx.whole.length - src.length;
+    const from = here + lLen;
+    // fast path as in emStrong; I_DEL_RIGHT has no lazy alternative that could read past its match
+    if (ctx.closers === null && here < this.safeOf(ctx)) {
+      const r = this.delScan(src, ctx.whole.slice(from), from, Infinity, ctx.safe, lLen, plain);
+      if (r !== UNSURE) return r;
+    }
     const lastCloser = this.closersOf(ctx)['~'];
-    const from = ctx.whole.length - src.length + lLen;
     if (lastCloser < from) return undefined;
-    const mask = ctx.masked.slice(-1 * src.length + lLen);
-    const limit = lastCloser - from;
+    return this.delScan(src, ctx.masked.slice(from), from, lastCloser - from, Infinity, lLen, plain);
+  }
+
+  /** del's closer search, as emScan */
+  delScan(src, tail, from, limit, safe, lLen, plain) {
+    let need = lLen;
+    let m;
     const right = I_DEL_RIGHT;
     right.lastIndex = 0;
-    while ((m = right.exec(mask)) !== null && !(m.index > limit)) {
+    while ((m = right.exec(tail)) !== null) {
+      if (from + m.index + m[0].length + 2 > safe) return UNSURE;
+      if (m.index > limit) break;
       const run = m[1] || m[2] || m[3] || m[4] || m[5] || m[6];
       if (!run) continue;
       let rLen = [...run].length;
@@ -1583,7 +1650,7 @@ class Md {
       const inner = this.inlineTokens(raw.slice(lLen, -lLen), plain);
       return { len: raw.length, html: plain ? inner : `<del>${inner}</del>` };
     }
-    return undefined;
+    return m === null && safe !== Infinity ? UNSURE : undefined;
   }
 
   // ------------------------------------------------------------------ output
