@@ -1109,24 +1109,71 @@ class Md {
         endEarly = true;
       }
       if (!endEarly) {
+        // The item's further lines, walked by index in `whole` (marked takes them one at a time
+        // off the rest of the source). Each line is cut out as a string only where a probe, a
+        // lazy continuation or the item's content needs it.
         const pr = probesFor(indent);
-        while (src) {
-          const rawLine = firstLine(src);
-          nextLine = rawLine;
-          const expanded = expandLeading(nextLine, 0);
-          if (
-            probeCandidate(nextLine) &&
-            (pr.fences.test(nextLine) ||
-              pr.heading.test(nextLine) ||
-              pr.html.test(nextLine) ||
-              pr.blockquote.test(nextLine) ||
-              pr.bullet.test(nextLine) ||
-              pr.hr.test(nextLine))
-          )
-            break;
-          if (firstNonSpace(expanded) >= indent || !nextLine.trim()) {
-            content += '\n' + expanded.slice(indent);
+        const n = whole.length;
+        let p = n - src.length;
+        const parts = [content];
+        // `line` is the previous line, expanded and without the item's indentation; after the
+        // first line it is built only when a lazy continuation asks for it
+        let lineStr = line;
+        let prevP = 0;
+        let prevSp = 0;
+        let prevLe = 0;
+        let prevTab = false;
+        while (p < n) {
+          const nl = whole.indexOf('\n', p);
+          const le = nl === -1 ? n : nl;
+          // the run of spaces and tabs at the start of the line (what expandLeading expands)
+          let sp = p;
+          let tab = false;
+          for (;;) {
+            const c = whole.charCodeAt(sp);
+            if (c === 32) sp++;
+            else if (c === 9) {
+              tab = true;
+              sp++;
+            } else break;
+          }
+          // probeCandidate: up to three spaces, then a character a probe could start with
+          let k = 0;
+          while (k < 4 && whole.charCodeAt(p + k) === 32) k++;
+          if (k < 4) {
+            const c = whole.charCodeAt(p + k);
+            if (c < 128 && CH_PROBE[c] === 1) {
+              const probe = whole.slice(p, le);
+              if (
+                pr.fences.test(probe) ||
+                pr.heading.test(probe) ||
+                pr.html.test(probe) ||
+                pr.blockquote.test(probe) ||
+                pr.bullet.test(probe) ||
+                pr.hr.test(probe)
+              )
+                break;
+            }
+          }
+          // firstNonSpace of the expanded line (-1: nothing but blanks), and `!line.trim()`
+          const expanded = tab ? expandTabs(whole.slice(p, sp), 0) + whole.slice(sp, le) : null;
+          const width = sp >= le ? -1 : tab ? expanded.length - (le - sp) : sp - p;
+          let isBlank = sp >= le;
+          if (!isBlank && isJsSpace(whole.charCodeAt(sp))) {
+            let j = sp;
+            while (j < le && isJsSpace(whole.charCodeAt(j))) j++;
+            isBlank = j === le;
+          }
+          if (width >= indent || isBlank) {
+            parts.push(tab ? expanded.slice(indent) : whole.slice(p + indent, le));
           } else {
+            if (lineStr === null) {
+              const prev = prevTab
+                ? expandTabs(whole.slice(prevP, prevSp), 0) + whole.slice(prevSp, prevLe)
+                : whole.slice(prevP, prevLe);
+              lineStr = prev.slice(indent);
+            }
+            const line = lineStr;
             if (
               blank ||
               line.replace(/\t/g, '    ').search(R_NON_SPACE) >= 4 ||
@@ -1136,16 +1183,23 @@ class Md {
               pr.hr.test(line)
             )
               break;
+            const nextLine = whole.slice(p, le);
             const add =
               R_LIST_SETEXT_LINE.test(nextLine) && B_LHEADING.test(`${line}\n${nextLine}`)
-                ? `    ${expanded.replace(/^ {0,3}/, '')}`
+                ? `    ${(tab ? expanded : nextLine).replace(/^ {0,3}/, '')}`
                 : nextLine;
-            content += '\n' + add;
+            parts.push(add);
           }
-          blank = !nextLine.trim();
-          src = src.substring(rawLine.length + 1);
-          line = expanded.slice(indent);
+          blank = isBlank;
+          lineStr = null;
+          prevP = p;
+          prevSp = sp;
+          prevLe = le;
+          prevTab = tab;
+          p = le + 1;
         }
+        if (parts.length > 1) content = parts.join('\n');
+        src = p >= n ? '' : whole.substring(p);
       }
       const itemRaw = whole.slice(start, whole.length - src.length);
       if (!list.loose) {
