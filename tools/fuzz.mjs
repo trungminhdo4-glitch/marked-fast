@@ -17,12 +17,18 @@ import { pathToFileURL } from 'node:url';
 
 const args = process.argv.slice(2);
 const kit = resolve(args[0] ?? '../kit-md/markdown-render-speed-02-kit');
-const opt = (name, def) => {
+const opt = (name, fallback, max) => {
   const i = args.indexOf(name);
-  return i === -1 ? def : Number(args[i + 1]);
+  if (i === -1) return fallback;
+  const value = Number(args[i + 1]);
+  if (!Number.isSafeInteger(value) || value < 1 || value > max) {
+    console.error(`${name} must be an integer from 1 to ${max}`);
+    process.exit(2);
+  }
+  return value;
 };
-const N = opt('--n', 20000);
-let seed = opt('--seed', 1) >>> 0;
+const N = opt('--n', 20000, Number.MAX_SAFE_INTEGER);
+let seed = opt('--seed', 1, 0xffff_ffff);
 const rand = () => {
   // xorshift32
   seed ^= seed << 13;
